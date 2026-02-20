@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "format": "prettier --write 'src/**/*.{js,ts,jsx,tsx,json,css,md}' 'tests/**/*.{js,ts,jsx,tsx,json,css,md}'",
+    "format": "prettier --write 'src/**/*.{mjs,js,ts,jsx,tsx,json,css,md}' 'tests/**/*.{mjs,js,ts,jsx,tsx,json,css,md}'",
     "preview": "vite preview",
     "test": "jest",
     "test:watch": "jest --watch"

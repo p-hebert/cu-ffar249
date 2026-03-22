@@ -1,0 +1,12 @@
+{
+  "name": "max-msp",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "description": "",
+  "main": "max-msp.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}

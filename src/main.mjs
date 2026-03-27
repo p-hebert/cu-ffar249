@@ -1,30 +1,34 @@
+import P5Global from "src/p5/global.mjs";
 import P5Runtime from "src/p5/runtime.mjs";
-import BlueScene from "src/scenes/blue.mjs";
-import GreenScene from "src/scenes/green.mjs";
+import { resources } from "src/resources.mjs";
+import GameScene from "src/scenes/game.mjs";
+import LoadingScene from "src/scenes/loading.mjs";
 import MenuScene from "src/scenes/menu.mjs";
-import RedScene from "src/scenes/red.mjs";
 
 /**
  * Instantiate the runtime
  */
 const RUNTIME = new P5Runtime({
   frameRate: 60,
-  width: 800,
-  height: 800,
+  width: window.innerWidth,
+  height: window.innerHeight,
 });
 
+const LOADING = new LoadingScene({
+  resources: resources,
+  nextScene: "menu",
+  title: "Loading",
+  getStatusText: null,
+});
 const MENU = new MenuScene();
-const RED = new RedScene();
-const GREEN = new GreenScene();
-const BLUE = new BlueScene();
+const GAME = new GameScene();
 
 /**
  * Register scenes, with MenuScene as starting scene
  */
-RUNTIME.registerScene(MENU, { current: true });
-RUNTIME.registerScene(RED);
-RUNTIME.registerScene(GREEN);
-RUNTIME.registerScene(BLUE);
+RUNTIME.registerScene(LOADING, { current: true });
+RUNTIME.registerScene(MENU);
+RUNTIME.registerScene(GAME);
 
 /**
  * Create a p5 sketch in instance mode, and register the P5Runtime (SceneManager)
@@ -35,7 +39,10 @@ new window.p5(
    * @param {import('p5')} p5
    */
   function sketch(p5) {
-    p5.setup = () => RUNTIME.setup(p5);
+    p5.setup = () => {
+      P5Global.set(p5);
+      RUNTIME.setup(p5);
+    };
     p5.draw = () => RUNTIME.draw(p5);
     p5.keyPressed = (event) => RUNTIME.keyPressed(p5, event);
     p5.keyReleased = (event) => RUNTIME.keyReleased(p5, event);

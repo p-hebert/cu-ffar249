@@ -4,9 +4,13 @@ import { Command } from "commander";
 import { parse } from "csv-parse/sync";
 import { stringify } from "csv-stringify/sync";
 import { markdownTable } from "markdown-table";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { stdin as input, stdout as output } from "node:process";
+import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import WebSocket from "ws";
 import { VadBert } from "../src/nlp/vad-bert.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -17,6 +21,9 @@ const __dirname = path.dirname(__filename);
  * 1. absolute path
  * 2. cwd-relative path
  * 3. script-relative path
+ *
+ * @param {string} inputPath
+ * @returns {Promise<string>}
  */
 async function resolveInputPath(inputPath) {
   if (path.isAbsolute(inputPath)) {
@@ -75,6 +82,14 @@ function parseRange(value) {
 }
 
 /**
+ * @param {string | undefined} value
+ * @returns {boolean}
+ */
+function isWebSocketAddress(value) {
+  return typeof value === "string" && /^wss?:\/\//u.test(value);
+}
+
+/**
  * Read text inputs from a file.
  * - If .csv: expects a "text" column
  * - Otherwise: reads non-empty lines
@@ -83,8 +98,9 @@ function parseRange(value) {
  * @returns {Promise<string[]>}
  */
 async function readInputsFromFile(filepath) {
-  const content = await fs.readFile(await resolveInputPath(filepath), "utf8");
-  const ext = path.extname(filepath).toLowerCase();
+  const resolvedPath = await resolveInputPath(filepath);
+  const content = await fs.readFile(resolvedPath, "utf8");
+  const ext = path.extname(resolvedPath).toLowerCase();
 
   if (ext === ".csv") {
     const records = parse(content, {
@@ -115,6 +131,34 @@ async function readInputsFromFile(filepath) {
 }
 
 /**
+ * @param {number} value
+ * @returns {string}
+ */
+function formatScore(value) {
+  return Number(value).toFixed(4);
+}
+
+/**
+ * @param {{ valence: number, arousal: number, dominance: number }} vad
+ * @returns {[number, number, number]}
+ */
+function vadToArray(vad) {
+  return [vad.valence, vad.arousal, vad.dominance];
+}
+
+/**
+ * @param {{ valence: number, arousal: number, dominance: number }} raw
+ * @param {{ min: number, max: number } | null} range
+ * @returns {{ valence: number, arousal: number, dominance: number }}
+ */
+function maybeNormalize(raw, range) {
+  if (!range) {
+    return raw;
+  }
+  return VadBert.normalizeVAD(raw, range.min, range.max);
+}
+
+/**
  * Build output rows from text inputs.
  *
  * @param {VadBert} model
@@ -127,37 +171,38 @@ async function runModel(model, texts, range) {
 
   return texts.map((text, index) => {
     const raw = predictions[index];
+    const values = maybeNormalize(raw, range);
 
     if (!range) {
       return {
         text,
-        valence: raw.valence,
-        arousal: raw.arousal,
-        dominance: raw.dominance,
+        valence: values.valence,
+        arousal: values.arousal,
+        dominance: values.dominance,
       };
     }
-
-    const normalized = VadBert.normalizeVAD(raw, range.min, range.max);
 
     return {
       text,
       min: range.min,
       max: range.max,
-      valence: normalized.valence,
-      arousal: normalized.arousal,
-      dominance: normalized.dominance,
+      valence: values.valence,
+      arousal: values.arousal,
+      dominance: values.dominance,
     };
   });
 }
 
 /**
- * Format numbers for output.
- *
- * @param {number} value
- * @returns {string}
+ * @param {Array<Record<string, string | number>>} rows
+ * @param {{ min: number, max: number } | null} range
+ * @returns {string[]}
  */
-function formatScore(value) {
-  return Number(value).toFixed(4);
+function getColumns(rows, range) {
+  void rows;
+  return range
+    ? ["text", "min", "max", "valence", "arousal", "dominance"]
+    : ["text", "valence", "arousal", "dominance"];
 }
 
 /**
@@ -167,9 +212,7 @@ function formatScore(value) {
  * @param {{ min: number, max: number } | null} range
  */
 function printMarkdownTable(rows, range) {
-  const header = range
-    ? ["text", "min", "max", "valence", "arousal", "dominance"]
-    : ["text", "valence", "arousal", "dominance"];
+  const header = getColumns(rows, range);
 
   const body = rows.map((row) =>
     range
@@ -192,6 +235,193 @@ function printMarkdownTable(rows, range) {
   console.log(markdownTable([header, ...body]));
 }
 
+/**
+ * Print a single row as a markdown table.
+ *
+ * @param {Record<string, string | number>} row
+ * @param {{ min: number, max: number } | null} range
+ */
+function printMarkdownRow(row, range) {
+  printMarkdownTable([row], range);
+}
+
+/**
+ * @param {Array<Record<string, string | number>>} rows
+ * @param {{ min: number, max: number } | null} range
+ * @returns {string}
+ */
+function rowsToCsv(rows, range) {
+  return stringify(rows, {
+    header: true,
+    columns: getColumns(rows, range),
+  });
+}
+
+/**
+ * @param {string} text
+ * @param {{ valence: number, arousal: number, dominance: number }} values
+ * @param {{ min: number, max: number } | null} range
+ * @returns {{
+ *   id: string,
+ *   type: string,
+ *   data: {
+ *     range: { min: number, max: number } | null,
+ *     values: [number, number, number]
+ *   }
+ * }}
+ */
+function makeWsPayload(text, values, range) {
+  return {
+    id: randomUUID(),
+    type: "vad-results",
+    data: {
+      text,
+      range,
+      values: vadToArray(values),
+    },
+  };
+}
+
+/**
+ * Send one text + VAD result to a websocket endpoint.
+ *
+ * @param {string} address
+ * @param {string} text
+ * @param {{ valence: number, arousal: number, dominance: number }} values
+ * @param {{ min: number, max: number } | null} range
+ * @returns {Promise<void>}
+ */
+async function sendOneToWebSocket(address, text, values, range) {
+  const payload = makeWsPayload(text, values, range);
+
+  await new Promise((resolve, reject) => {
+    const ws = new WebSocket(address);
+
+    let settled = false;
+    const cleanup = () => {
+      ws.removeAllListeners();
+    };
+
+    ws.once("open", () => {
+      ws.send(JSON.stringify(payload), (error) => {
+        if (error) {
+          if (!settled) {
+            settled = true;
+            cleanup();
+            try {
+              ws.close();
+            } catch {}
+            reject(error);
+          }
+          return;
+        }
+
+        try {
+          ws.close();
+        } catch {}
+
+        if (!settled) {
+          settled = true;
+          cleanup();
+          resolve();
+        }
+      });
+    });
+
+    ws.once("error", (error) => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        reject(error);
+      }
+    });
+
+    ws.once("close", () => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        resolve();
+      }
+    });
+  });
+}
+
+/**
+ * Process and emit one line immediately.
+ *
+ * @param {VadBert} model
+ * @param {string} text
+ * @param {{ min: number, max: number } | null} range
+ * @param {string | undefined} outputTarget
+ * @returns {Promise<void>}
+ */
+async function processOneLine(model, text, range, outputTarget) {
+  const raw = await model.predict(text);
+  const values = maybeNormalize(raw, range);
+
+  if (outputTarget) {
+    if (isWebSocketAddress(outputTarget)) {
+      await sendOneToWebSocket(outputTarget, text, values, range);
+      console.error(`Sent 1 row to ${outputTarget}`);
+      return;
+    }
+
+    throw new Error(
+      "Interactive mode only supports stdout or websocket output. CSV file output is not supported in streaming mode.",
+    );
+  }
+
+  const row = range
+    ? {
+        text,
+        min: range.min,
+        max: range.max,
+        valence: values.valence,
+        arousal: values.arousal,
+        dominance: values.dominance,
+      }
+    : {
+        text,
+        valence: values.valence,
+        arousal: values.arousal,
+        dominance: values.dominance,
+      };
+
+  printMarkdownRow(row, range);
+}
+
+/**
+ * Read lines interactively from the terminal and process each line immediately.
+ * Empty line exits.
+ *
+ * @param {VadBert} model
+ * @param {{ min: number, max: number } | null} range
+ * @param {string | undefined} outputTarget
+ * @returns {Promise<void>}
+ */
+async function runInteractive(model, range, outputTarget) {
+  const rl = readline.createInterface({ input, output });
+
+  console.error("Interactive input mode. Enter one line per prompt.");
+  console.error("Each line is processed immediately.");
+  console.error("Press Enter on an empty line to finish.\n");
+
+  try {
+    let lineNumber = 1;
+    while (true) {
+      const line = (await rl.question(`line ${lineNumber}> `)).trim();
+      if (!line) {
+        break;
+      }
+
+      await processOneLine(model, line, range, outputTarget);
+      lineNumber += 1;
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 async function main() {
   const program = new Command();
 
@@ -199,7 +429,7 @@ async function main() {
     .name("run-models")
     .description("Run local VAD-BERT inference on text input(s).")
     .option(
-      "-i, --input <text>",
+      "-l, --line <text>",
       "Input text line. Can be provided multiple times.",
       (value, previous) => {
         previous.push(value);
@@ -212,8 +442,12 @@ async function main() {
       'Input file. Reads line-by-line, or if CSV, uses the "text" column.',
     )
     .option(
-      "-o, --output <path>",
-      'Optional output CSV path. Format: "text,valence,arousal,dominance".',
+      "-i, --interactive",
+      "Interactive terminal mode. Each entered line is processed immediately.",
+    )
+    .option(
+      "-o, --output <path-or-ws>",
+      "Optional output destination. Use a CSV path or a websocket URL like ws://host:port.",
     )
     .option(
       "-r, --range <min,max>",
@@ -224,11 +458,24 @@ async function main() {
   const options = program.opts();
   const range = parseRange(options.range);
 
-  /** @type {string[]} */
-  let texts = [];
+  const vad = await VadBert.getInstance();
 
-  if (options.input.length > 0) {
-    texts.push(...options.input.map((value) => value.trim()).filter(Boolean));
+  if (options.interactive) {
+    if (options.output && !isWebSocketAddress(options.output)) {
+      throw new Error(
+        "Interactive mode supports stdout or websocket output only. CSV file output is only supported for batched --line/--file runs.",
+      );
+    }
+
+    await runInteractive(vad, range, options.output);
+    return;
+  }
+
+  /** @type {string[]} */
+  const texts = [];
+
+  if (options.line.length > 0) {
+    texts.push(...options.line.map((value) => value.trim()).filter(Boolean));
   }
 
   if (options.file) {
@@ -237,29 +484,35 @@ async function main() {
   }
 
   if (texts.length === 0) {
-    console.error("Error: provide at least one -i input or a -f file.");
-    process.exit(1);
+    throw new Error(
+      "Provide at least one --line, a --file, or use --interactive.",
+    );
   }
 
-  const vad = await VadBert.getInstance();
   const rows = await runModel(vad, texts, range);
 
   if (options.output) {
+    if (isWebSocketAddress(options.output)) {
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const values = {
+          valence: Number(row.valence),
+          arousal: Number(row.arousal),
+          dominance: Number(row.dominance),
+        };
+        await sendOneToWebSocket(options.output, texts[i], values, range);
+      }
+      console.error(`Sent ${rows.length} row(s) to ${options.output}`);
+      return;
+    }
+
     const outputPath = path.isAbsolute(options.output)
       ? options.output
       : path.resolve(process.cwd(), options.output);
 
-    const columns = range
-      ? ["text", "min", "max", "valence", "arousal", "dominance"]
-      : ["text", "valence", "arousal", "dominance"];
-
-    const csv = stringify(rows, {
-      header: true,
-      columns,
-    });
-
+    const csv = rowsToCsv(rows, range);
     await fs.writeFile(outputPath, csv, "utf8");
-    console.log(`Wrote ${rows.length} row(s) to ${outputPath}`);
+    console.error(`Wrote ${rows.length} row(s) to ${outputPath}`);
     return;
   }
 

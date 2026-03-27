@@ -145,6 +145,8 @@ function main() {
     ws.on("close", () => CLIENTS.delete(ws));
   });
 
+  console.log(wss);
+
   const address = wss.address();
   logger.log(`LISTENING [${address.address}]:${address.port}`);
 

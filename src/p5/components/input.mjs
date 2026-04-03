@@ -17,7 +17,12 @@ import {
  * - focus state
  * - click-to-focus
  * - click-inside / click-outside behavior
- * - minimal text-input plumbing
+ * - text editing state:
+ *   - cursor
+ *   - selection
+ *   - copy / cut / paste
+ *   - word navigation
+ *   - line/home/end navigation
  *
  * Child classes must implement:
  * - setup(p5)
@@ -33,8 +38,6 @@ import {
  * - onPressStart
  * - onPressEnd
  * - onSubmit
- * - insertText
- * - backspace
  */
 export default class BaseInteractiveInput extends IP5Lifecycle {
   /**
@@ -44,7 +47,13 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
    *   focusOnClick?: boolean,
    *   permanentFocus?: boolean,
    *   submitOnEnter?: boolean,
-   *   value?: string,
+   *   value?: string | null,
+   *   placeholder?: string | null,
+   *   enableClipboardShortcuts?: boolean,
+   *   enableSelectionShortcuts?: boolean,
+   *   enableWordNavigationShortcuts?: boolean,
+   *   enableBoundaryNavigationShortcuts?: boolean,
+   *   enableSelectAllShortcut?: boolean,
    * }} [options]
    */
   constructor(options = {}) {
@@ -61,11 +70,80 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
     this.permanentFocus = options.permanentFocus ?? false;
     this.submitOnEnter = options.submitOnEnter ?? true;
 
+    this.enableClipboardShortcuts = options.enableClipboardShortcuts ?? true;
+    this.enableSelectionShortcuts = options.enableSelectionShortcuts ?? true;
+    this.enableWordNavigationShortcuts =
+      options.enableWordNavigationShortcuts ?? true;
+    this.enableBoundaryNavigationShortcuts =
+      options.enableBoundaryNavigationShortcuts ?? true;
+    this.enableSelectAllShortcut = options.enableSelectAllShortcut ?? true;
+
+    this.placeholder = options.placeholder ?? null;
     this.value = options.value ?? null;
+
+    /**
+     * Caret index in current text
+     * @type {number}
+     */
+    this.cursorIndex = this.text.length;
+
+    /**
+     * Selection anchor / focus.
+     * When equal => no selection.
+     * Selection range is [min(anchor, focus), max(anchor, focus))
+     * @type {number}
+     */
+    this.selectionAnchor = this.cursorIndex;
+    this.selectionFocus = this.cursorIndex;
+  }
+
+  /**
+   * Current normalized text.
+   * @returns {string}
+   */
+  get text() {
+    return this.value ?? "";
+  }
+
+  /**
+   * Replace current text while preserving the null-for-empty convention.
+   * Also clamps caret/selection.
+   *
+   * @param {string | null | undefined} next
+   */
+  setText(next) {
+    const normalized = next ?? "";
+    this.value = normalized === "" ? null : normalized;
+    this._clampEditingState();
+  }
+
+  /**
+   * Whether the input currently has a non-empty selection.
+   * @returns {boolean}
+   */
+  get hasSelection() {
+    return this.selectionAnchor !== this.selectionFocus;
+  }
+
+  /**
+   * Selection start index (inclusive)
+   * @returns {number}
+   */
+  get selectionStart() {
+    return Math.min(this.selectionAnchor, this.selectionFocus);
+  }
+
+  /**
+   * Selection end index (exclusive)
+   * @returns {number}
+   */
+  get selectionEnd() {
+    return Math.max(this.selectionAnchor, this.selectionFocus);
   }
 
   clear() {
-    this.value = null;
+    this.setText("");
+    this.moveCursorToEnd(false);
   }
 
   /**
@@ -109,6 +187,7 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
 
     this.focused = false;
     this.pressed = false;
+    this.collapseSelectionToCursor();
     this.onBlur(p5, event);
   }
 
@@ -124,9 +203,26 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
   }
 
   /**
-   * Default text insertion behavior.
+   * Replace the current selection, or insert at caret if no selection.
    *
-   * Child classes can override to support cursor position, selection, etc.
+   * @param {string} text
+   */
+  replaceSelection(text) {
+    const current = this.text;
+    const start = this.selectionStart;
+    const end = this.selectionEnd;
+    const next = current.slice(0, start) + text + current.slice(end);
+
+    this.setText(next);
+
+    const nextCursor = start + text.length;
+    this.cursorIndex = nextCursor;
+    this.selectionAnchor = nextCursor;
+    this.selectionFocus = nextCursor;
+  }
+
+  /**
+   * Default text insertion behavior.
    *
    * @param {import('p5')} p5
    * @param {string} text
@@ -134,20 +230,260 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
    */
   insertText(p5, text, event) {
     if (this.disabled || !this.focused) return;
-    if (this.value === null) this.value = text;
-    else this.value += text;
+    this.replaceSelection(text);
   }
 
   /**
-   * Default backspace behavior.
+   * Backspace selection or previous character.
    *
    * @param {import('p5')} p5
    * @param {KeyboardEvent} event
    */
   backspace(p5, event) {
     if (this.disabled || !this.focused) return;
-    this.value = this.value.slice(0, -1);
-    if (this.value === "") this.value = null;
+
+    if (this.hasSelection) {
+      this.replaceSelection("");
+      return;
+    }
+
+    if (this.cursorIndex <= 0) return;
+
+    const current = this.text;
+    const originalCursorIndex = this.cursorIndex;
+
+    const next =
+      current.slice(0, originalCursorIndex - 1) +
+      current.slice(originalCursorIndex);
+
+    const nextCursor = originalCursorIndex - 1;
+
+    this.setText(next);
+
+    this.cursorIndex = nextCursor;
+    this.selectionAnchor = nextCursor;
+    this.selectionFocus = nextCursor;
+  }
+  /**
+   * Delete selection or next character.
+   *
+   * @param {import('p5')} p5
+   * @param {KeyboardEvent} event
+   */
+  deleteForward(p5, event) {
+    if (this.disabled || !this.focused) return;
+
+    if (this.hasSelection) {
+      this.replaceSelection("");
+      return;
+    }
+
+    const current = this.text;
+    if (this.cursorIndex >= current.length) return;
+
+    const next =
+      current.slice(0, this.cursorIndex) + current.slice(this.cursorIndex + 1);
+
+    this.setText(next);
+    this.selectionAnchor = this.cursorIndex;
+    this.selectionFocus = this.cursorIndex;
+  }
+
+  /**
+   * Collapse selection to start or end.
+   *
+   * @param {"start" | "end"} edge
+   */
+  collapseSelection(edge = "end") {
+    if (!this.hasSelection) return;
+
+    const nextCursor =
+      edge === "start" ? this.selectionStart : this.selectionEnd;
+
+    this.cursorIndex = nextCursor;
+    this.selectionAnchor = nextCursor;
+    this.selectionFocus = nextCursor;
+  }
+
+  collapseSelectionToCursor() {
+    this.selectionAnchor = this.cursorIndex;
+    this.selectionFocus = this.cursorIndex;
+  }
+
+  selectAll() {
+    const len = this.text.length;
+    this.cursorIndex = len;
+    this.selectionAnchor = 0;
+    this.selectionFocus = len;
+  }
+
+  /**
+   * @returns {string}
+   */
+  getSelectedText() {
+    if (!this.hasSelection) return "";
+    return this.text.slice(this.selectionStart, this.selectionEnd);
+  }
+
+  /**
+   * Move caret to exact index.
+   *
+   * @param {number} index
+   * @param {boolean} extendSelection
+   */
+  moveCursorTo(index, extendSelection = false) {
+    const clamped = this._clampIndex(index);
+    this.cursorIndex = clamped;
+
+    if (extendSelection) {
+      this.selectionFocus = clamped;
+    } else {
+      this.selectionAnchor = clamped;
+      this.selectionFocus = clamped;
+    }
+  }
+
+  /**
+   * @param {boolean} extendSelection
+   */
+  moveCursorToStart(extendSelection = false) {
+    this.moveCursorTo(0, extendSelection);
+  }
+
+  /**
+   * @param {boolean} extendSelection
+   */
+  moveCursorToEnd(extendSelection = false) {
+    this.moveCursorTo(this.text.length, extendSelection);
+  }
+
+  /**
+   * @param {boolean} extendSelection
+   */
+  moveCursorLeft(extendSelection = false) {
+    if (!extendSelection && this.hasSelection) {
+      this.collapseSelection("start");
+      return;
+    }
+
+    this.moveCursorTo(this.cursorIndex - 1, extendSelection);
+  }
+
+  /**
+   * @param {boolean} extendSelection
+   */
+  moveCursorRight(extendSelection = false) {
+    if (!extendSelection && this.hasSelection) {
+      this.collapseSelection("end");
+      return;
+    }
+
+    this.moveCursorTo(this.cursorIndex + 1, extendSelection);
+  }
+
+  /**
+   * Move to previous word boundary.
+   *
+   * @param {boolean} extendSelection
+   */
+  moveCursorWordLeft(extendSelection = false) {
+    const text = this.text;
+    let i = this.cursorIndex;
+
+    if (!extendSelection && this.hasSelection) {
+      i = this.selectionStart;
+    }
+
+    if (i <= 0) {
+      this.moveCursorTo(0, extendSelection);
+      return;
+    }
+
+    // Skip whitespace to the left
+    while (i > 0 && /\s/.test(text[i - 1])) i--;
+
+    // Skip non-whitespace word chars to the left
+    while (i > 0 && !/\s/.test(text[i - 1])) i--;
+
+    this.moveCursorTo(i, extendSelection);
+  }
+
+  /**
+   * Move to next word boundary.
+   *
+   * @param {boolean} extendSelection
+   */
+  moveCursorWordRight(extendSelection = false) {
+    const text = this.text;
+    const len = text.length;
+    let i = this.cursorIndex;
+
+    if (!extendSelection && this.hasSelection) {
+      i = this.selectionEnd;
+    }
+
+    if (i >= len) {
+      this.moveCursorTo(len, extendSelection);
+      return;
+    }
+
+    // Skip whitespace to the right
+    while (i < len && /\s/.test(text[i])) i++;
+
+    // Skip current word to the right
+    while (i < len && !/\s/.test(text[i])) i++;
+
+    this.moveCursorTo(i, extendSelection);
+  }
+
+  /**
+   * @param {boolean} extendSelection
+   */
+  moveBoundaryStart(extendSelection = false) {
+    this.moveCursorToStart(extendSelection);
+  }
+
+  /**
+   * @param {boolean} extendSelection
+   */
+  moveBoundaryEnd(extendSelection = false) {
+    this.moveCursorToEnd(extendSelection);
+  }
+
+  /**
+   * Copy current selection to clipboard.
+   */
+  async copySelection() {
+    if (!this.enableClipboardShortcuts) return;
+    if (!this.hasSelection) return;
+    if (!navigator?.clipboard?.writeText) return;
+
+    await navigator.clipboard.writeText(this.getSelectedText());
+  }
+
+  /**
+   * Cut current selection to clipboard.
+   */
+  async cutSelection() {
+    if (!this.enableClipboardShortcuts) return;
+    if (!this.hasSelection) return;
+    if (!navigator?.clipboard?.writeText) return;
+
+    await navigator.clipboard.writeText(this.getSelectedText());
+    this.replaceSelection("");
+  }
+
+  /**
+   * Paste clipboard contents at current selection / caret.
+   */
+  async pasteClipboard() {
+    if (!this.enableClipboardShortcuts) return;
+    if (!navigator?.clipboard?.readText) return;
+
+    const text = await navigator.clipboard.readText();
+    if (typeof text !== "string" || text.length === 0) return;
+
+    this.replaceSelection(text);
   }
 
   /**
@@ -219,28 +555,161 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
    * @param {import('p5')} p5
    * @param {KeyboardEvent} event
    */
-  keyPressed(p5, event) {
+  async keyPressed(p5, event) {
     if (this.disabled || !this.focused) return;
 
-    // Prevent browser shortcuts / default text-navigation behavior
-    if (event.key === "'" || event.key === "/" || event.key === "Backspace") {
+    const key = event.key;
+    const isPrimaryModifier = event.metaKey || event.ctrlKey;
+    const isShift = event.shiftKey;
+    const isAlt = event.altKey;
+
+    // Browser/default prevention: when focused, this widget owns handled keys.
+    const handledKeys = new Set([
+      "'",
+      "/",
+      "Backspace",
+      "Delete",
+      "Enter",
+      "ArrowLeft",
+      "ArrowRight",
+      "Home",
+      "End",
+    ]);
+
+    if (handledKeys.has(key) || key.length === 1 || isPrimaryModifier) {
       event.preventDefault();
     }
 
-    if (event.key === "Backspace") {
+    // Cmd/Ctrl + A
+    if (
+      this.enableSelectAllShortcut &&
+      isPrimaryModifier &&
+      !isAlt &&
+      key.toLowerCase() === "a"
+    ) {
+      this.selectAll();
+      return;
+    }
+
+    // Cmd/Ctrl + C
+    if (
+      this.enableClipboardShortcuts &&
+      isPrimaryModifier &&
+      !isAlt &&
+      key.toLowerCase() === "c"
+    ) {
+      await this.copySelection();
+      return;
+    }
+
+    // Cmd/Ctrl + X
+    if (
+      this.enableClipboardShortcuts &&
+      isPrimaryModifier &&
+      !isAlt &&
+      key.toLowerCase() === "x"
+    ) {
+      await this.cutSelection();
+      return;
+    }
+
+    // Cmd/Ctrl + V
+    if (
+      this.enableClipboardShortcuts &&
+      isPrimaryModifier &&
+      !isAlt &&
+      key.toLowerCase() === "v"
+    ) {
+      await this.pasteClipboard();
+      return;
+    }
+
+    // Start / End
+    if (this.enableBoundaryNavigationShortcuts && key === "Home") {
+      this.moveBoundaryStart(isShift);
+      return;
+    }
+
+    if (this.enableBoundaryNavigationShortcuts && key === "End") {
+      this.moveBoundaryEnd(isShift);
+      return;
+    }
+
+    // Cmd/Ctrl + Arrow => start/end
+    if (
+      this.enableBoundaryNavigationShortcuts &&
+      isPrimaryModifier &&
+      key === "ArrowLeft"
+    ) {
+      this.moveBoundaryStart(isShift);
+      return;
+    }
+
+    if (
+      this.enableBoundaryNavigationShortcuts &&
+      isPrimaryModifier &&
+      key === "ArrowRight"
+    ) {
+      this.moveBoundaryEnd(isShift);
+      return;
+    }
+
+    // Option/Alt + Arrow => previous/next word
+    if (
+      this.enableWordNavigationShortcuts &&
+      isAlt &&
+      !isPrimaryModifier &&
+      key === "ArrowLeft"
+    ) {
+      this.moveCursorWordLeft(isShift);
+      return;
+    }
+
+    if (
+      this.enableWordNavigationShortcuts &&
+      isAlt &&
+      !isPrimaryModifier &&
+      key === "ArrowRight"
+    ) {
+      this.moveCursorWordRight(isShift);
+      return;
+    }
+
+    // Regular arrow movement / shift-selection
+    if (this.enableSelectionShortcuts && key === "ArrowLeft") {
+      this.moveCursorLeft(isShift);
+      return;
+    }
+
+    if (this.enableSelectionShortcuts && key === "ArrowRight") {
+      this.moveCursorRight(isShift);
+      return;
+    }
+
+    if (key === "Backspace") {
       this.backspace(p5, event);
       return;
     }
 
-    if (event.key === "Enter") {
+    if (key === "Delete") {
+      this.deleteForward(p5, event);
+      return;
+    }
+
+    if (key === "Enter") {
       if (this.submitOnEnter) {
         this.onSubmit(p5, event);
       }
       return;
     }
 
-    if (event.key.length === 1) {
-      this.insertText(p5, event.key, event);
+    // Ignore other primary-modifier combos
+    if (isPrimaryModifier) {
+      return;
+    }
+
+    if (key.length === 1) {
+      this.insertText(p5, key, event);
     }
   }
 
@@ -250,11 +719,25 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
    */
   keyReleased(p5, event) {
     if (this.disabled || !this.focused) return;
+  }
 
-    // Prevent browser shortcuts / default text-navigation behavior
-    if (event.key === "'" || event.key === "/" || event.key === "Backspace") {
-      event.preventDefault();
-    }
+  /**
+   * Clamp cursor/selection to valid bounds.
+   */
+  _clampEditingState() {
+    const len = this.text.length;
+    this.cursorIndex = this._clampIndex(this.cursorIndex, len);
+    this.selectionAnchor = this._clampIndex(this.selectionAnchor, len);
+    this.selectionFocus = this._clampIndex(this.selectionFocus, len);
+  }
+
+  /**
+   * @param {number} index
+   * @param {number} [len]
+   * @returns {number}
+   */
+  _clampIndex(index, len = this.text.length) {
+    return Math.max(0, Math.min(index, len));
   }
 
   /**

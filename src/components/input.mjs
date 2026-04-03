@@ -7,7 +7,7 @@ import FontBook from "src/utils/fonts.mjs";
 
 /**
  * @callback onSubmitCallback
- * @param {string} value Input text value
+ * @param {string | null} value Input text value
  */
 
 export default class LineInput extends BaseInteractiveInput {
@@ -17,28 +17,43 @@ export default class LineInput extends BaseInteractiveInput {
    *   y: number,
    *   w: number,
    *   h: number,
-   *   value?: string,
+   *   value?: string | null,
    *   placeholder?: string,
    *   onSubmitCallback?: onSubmitCallback,
-   *   styles: {
-   *     padding: number,
-   *     fontPlaceholder: P5Font,
-   *     fontValue: P5Font,
-   *   }
+   *   styles?: {
+   *     padding?: number,
+   *     fontPlaceholder?: P5Font,
+   *     fontValue?: P5Font,
+   *     selectionFill?: [number, number, number, number?] | number[],
+   *   },
+   *   enableClipboardShortcuts?: boolean,
+   *   enableSelectionShortcuts?: boolean,
+   *   enableWordNavigationShortcuts?: boolean,
+   *   enableBoundaryNavigationShortcuts?: boolean,
+   *   enableSelectAllShortcut?: boolean,
    * }} options
    */
   constructor(options) {
-    super({ value: options.value });
+    super({
+      value: options.value,
+      placeholder: options.placeholder,
+      enableClipboardShortcuts: options.enableClipboardShortcuts ?? true,
+      enableSelectionShortcuts: options.enableSelectionShortcuts ?? true,
+      enableWordNavigationShortcuts:
+        options.enableWordNavigationShortcuts ?? true,
+      enableBoundaryNavigationShortcuts:
+        options.enableBoundaryNavigationShortcuts ?? true,
+      enableSelectAllShortcut: options.enableSelectAllShortcut ?? true,
+    });
 
     this.x = options.x;
     this.y = options.y;
     this.w = options.w;
     this.h = options.h;
-    this.value = options.value ?? null;
-    this.placeholder = options.placeholder;
+    this.placeholder = options.placeholder ?? null;
     this.styles = options.styles ?? {};
     this._onSubmitCallback = options.onSubmitCallback ?? (() => {});
-    this._focusedDuration = null;
+    this._focusedDuration = this.focused ? 0 : null;
   }
 
   get opacity() {
@@ -55,16 +70,18 @@ export default class LineInput extends BaseInteractiveInput {
     }
   }
 
-  get cursor() {
-    return this.focused && this._focusedDuration % 1000 <= 500 ? "|" : "";
+  get cursorVisible() {
+    return (
+      this.focused &&
+      this._focusedDuration !== null &&
+      this._focusedDuration % 1000 <= 500
+    );
   }
 
   /**
    * @param {import('p5')} p5
    */
-  setup(p5) {
-    // Optional subclass setup
-  }
+  setup(p5) {}
 
   /**
    * @param {number} x
@@ -78,51 +95,87 @@ export default class LineInput extends BaseInteractiveInput {
   }
 
   /**
+   * Returns the text that should be drawn.
+   *
+   * @returns {string}
+   */
+  getDisplayText() {
+    if (!this.focused && !this.value) {
+      return this.placeholder ?? "";
+    }
+
+    return this.value ?? "";
+  }
+
+  /**
+   * @param {import('p5')} p5
+   */
+  _applyTextStyles(p5) {
+    if (!this.focused && !this.value) {
+      if (FontBook.isFont(this.styles?.fontPlaceholder)) {
+        p5.textFont(this.styles.fontPlaceholder);
+      }
+    } else if (FontBook.isFont(this.styles?.fontValue)) {
+      p5.textFont(this.styles.fontValue);
+    }
+
+    p5.textAlign(p5.LEFT, p5.BASELINE);
+    p5.textSize(this.h - 2 * (this.styles?.padding ?? 2) - 1);
+  }
+
+  /**
    * @param {import('p5')} p5
    */
   draw(p5) {
-    if (this.focused) {
+    if (this.focused && this._focusedDuration !== null) {
       this._focusedDuration += p5.deltaTime;
     }
+
+    const padding = this.styles?.padding ?? 2;
+    const displayText = this.getDisplayText();
+
     p5.push();
     {
-      // Rendering input field
+      // Underline
       p5.fill(255, this.opacity * 255);
       p5.noStroke();
       p5.rect(this.x, this.y + this.h, this.w, 1);
 
-      // Rendering text
-      // Preparing text styles
-      p5.fill(255, this.opacity * 255);
-      if (
-        this.value === null &&
-        FontBook.isFont(this.styles?.fontPlaceholder)
-      ) {
-        p5.textFont(this.styles.fontPlaceholder);
-      } else if (FontBook.isFont(this.styles?.fontValue)) {
-        p5.textFont(this.styles.fontValue);
-      }
-      p5.textAlign(p5.CENTER, p5.BASELINE);
-      p5.textSize(this.h - (this.styles?.padding ?? 2) - 1); // -1: bottom line
+      this._applyTextStyles(p5);
 
-      if (this.disabled) {
-        // NOT IMPLEMENTED
-      } else if (this.focused) {
-        const textCenterX = this.x + this.w / 2;
-        const textBottomY = this.y + this.h / 2;
-        const textWidth = !this.value ? 0 : p5.textWidth(this.value);
+      const textBottomY = this.y + this.h / 2;
+      const textWidth = p5.textWidth(displayText);
+      const textX = this.x + this.w / 2 - textWidth / 2;
 
-        p5.text(this.value ?? "", textCenterX, textBottomY);
-        const cursor = this.cursor;
-        const cursorCenterX =
-          textCenterX + textWidth / 2 + p5.textWidth(cursor) / 2;
-        p5.text(this.cursor, cursorCenterX, textBottomY);
-      } else {
-        p5.text(
-          this.value === null ? this.placeholder : this.value,
-          this.x + this.w / 2,
-          this.y + this.h / 2,
+      // Selection highlight (only over actual value while focused)
+      if (this.focused && this.hasSelection && this.value) {
+        const before = this.value.slice(0, this.selectionStart);
+        const selected = this.value.slice(
+          this.selectionStart,
+          this.selectionEnd,
         );
+
+        const selX = textX + p5.textWidth(before);
+        const selW = p5.textWidth(selected);
+
+        const selectionFill = this.styles?.selectionFill ?? [255, 255, 255, 64];
+        p5.noStroke();
+        p5.fill(...selectionFill);
+        p5.rect(selX, this.y - 5, selW, textBottomY + 2 - (this.y - 5));
+      }
+
+      // Text
+      p5.fill(255, this.opacity * 255);
+      p5.text(displayText, textX, textBottomY);
+
+      // Caret
+      if (this.focused && this.cursorVisible) {
+        const beforeCursor = (this.value ?? "").slice(0, this.cursorIndex);
+        const caretX = textX + p5.textWidth(beforeCursor);
+
+        p5.stroke(255, this.opacity * 255);
+        // FIXME: Offsets (0,-5,0,+2) are not dynamically calculated.
+        p5.line(caretX, this.y - 5, caretX, textBottomY + 2);
       }
     }
     p5.pop();
@@ -134,7 +187,7 @@ export default class LineInput extends BaseInteractiveInput {
    */
   onSubmit(p5, event) {
     this._onSubmitCallback(this.value);
-    this.value = null;
+    this.clear();
   }
 
   /**
@@ -143,6 +196,7 @@ export default class LineInput extends BaseInteractiveInput {
    */
   onFocus(p5, event) {
     this._focusedDuration = 0;
+    this.moveCursorToEnd(false);
   }
 
   /**

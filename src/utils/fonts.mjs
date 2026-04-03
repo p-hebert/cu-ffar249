@@ -87,6 +87,21 @@ export default class FontBook {
   }
 
   /**
+   *
+   * @param {string} prefix
+   * @returns {Object<string, P5Font>} Available font styles for family
+   */
+  static getFamily(prefix) {
+    const fontStyles = {};
+    for (const [key, font] of FontBook._fonts.entries()) {
+      if (key.startsWith(prefix)) {
+        fontStyles[key.replace(prefix + "--", "")] = font;
+      }
+    }
+    return fontStyles;
+  }
+
+  /**
    * Synchronous getter of loading Promise.
    *
    * @param {string} key
@@ -94,6 +109,12 @@ export default class FontBook {
    */
   static getPromise(key) {
     return FontBook._fontPromises.get(key) ?? null;
+  }
+
+  static isFont(obj) {
+    return (
+      typeof obj?.font?.glyphs === "object" && !(obj?.font?.glyphs === null)
+    );
   }
 
   static isSentinel(obj) {

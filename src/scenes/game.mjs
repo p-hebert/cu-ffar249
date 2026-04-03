@@ -1,10 +1,9 @@
-import { BaseScene, SceneRequest } from "src/p5/scene.mjs";
+import LineInput from "src/components/input.mjs";
+import { BaseScene } from "src/p5/scene.mjs";
 import FontBook from "src/utils/fonts.mjs";
 
-let currentText = "";
-
 /**
- * MainScene
+ * Game Scene
  *
  * TODO: Docs.
  */
@@ -14,8 +13,10 @@ export default class GameScene extends BaseScene {
 
   constructor() {
     super();
-    this.font = null;
+    this._fontFamily = null;
     this._setupped = false;
+    this._text = "";
+    this.input = null;
   }
 
   /**
@@ -23,22 +24,36 @@ export default class GameScene extends BaseScene {
    *
    * @param {import('p5')} p5
    */
-  // eslint-disable-next-line no-unused-vars
+
   setup(p5) {
     if (this._setupped) {
       return;
     }
 
-    FontBook.getPromise("source-sans-3--medium").then((font) => {
-      this.font = font;
+    this._fontFamily = FontBook.getFamily("source-sans-3");
+    const FONT_SIZE = 32;
+    const FONT_PADDING = 2;
+    const INPUT_HEIGHT = FONT_SIZE + 2 * FONT_PADDING;
+    const INPUT_X_MARGIN = Math.floor(p5.width * 0.1); // 10% on each side
+    const INPUT_WIDTH = p5.width - 2 * INPUT_X_MARGIN;
+
+    for (let [style, font] of Object.entries(this._fontFamily)) {
+      console.log(style, font, FontBook.isFont(font));
+    }
+    this.input = new LineInput({
+      x: INPUT_X_MARGIN,
+      y: p5.height / 2,
+      w: INPUT_WIDTH,
+      h: INPUT_HEIGHT,
+      placeholder: "Share your thoughts",
+      onSubmitCallback: (value) => console.log("Submitted", value),
+      styles: {
+        fontPlaceholder: this._fontFamily["light-italic"],
+        fontValue: this._fontFamily["light"],
+      },
     });
 
     this._setupped = true;
-    // Preload the sound effects for the Lose/Win scenes
-    return [
-      new SceneRequest("classic-tag-game.lose", "preload"),
-      new SceneRequest("classic-tag-game.win", "preload"),
-    ];
   }
 
   /**
@@ -54,36 +69,67 @@ export default class GameScene extends BaseScene {
    * @param {import('p5')} p5
    */
   draw(p5) {
-    p5.background("purple");
+    p5.background("black");
+    this.input.draw(p5);
 
-    const PLACEHOLDER_TEXT = "Share your thoughts";
-    let displayText;
-    p5.push();
-    {
-      if (currentText === "") {
-        p5.fill(255, 255, 255, 255 * 0.2);
-        p5.textStyle(p5.ITALIC);
-        displayText = PLACEHOLDER_TEXT;
-      } else {
-        displayText = currentText;
-      }
-      p5.textAlign(p5.CENTER, p5.TOP);
-      p5.textSize(32);
-      p5.text(displayText, p5.width / 2, p5.height / 2);
-    }
-    p5.pop();
-    const X_MARGIN = Math.floor(p5.width * 0.1); // 10% on each side
-    p5.push();
-    {
-      p5.stroke("fff");
-      p5.line(
-        X_MARGIN,
-        p5.height / 2 + 36,
-        p5.width - X_MARGIN,
-        p5.height / 2 + 36,
-      );
-    }
-    p5.pop();
+    // const PLACEHOLDER_TEXT = "Share your thoughts";
+    // let displayText;
+    // p5.push();
+    // {
+    //   if (this._text === "") {
+    //     p5.fill(255, 255, 255, 255 * 0.2);
+    //     if (FontBook.isFont(this._fontFamily?.["black-italic"])) {
+    //       p5.textFont(this._fontFamily?.["black-italic"]);
+    //     }
+    //     displayText = PLACEHOLDER_TEXT;
+    //   } else {
+    //     p5.fill(255, 255, 255);
+    //     if (FontBook.isFont(this._fontFamily?.["regular-italic"])) {
+    //       p5.textFont(this._fontFamily?.["regular-italic"]);
+    //     }
+    //     displayText = this._text;
+    //   }
+    //   p5.textAlign(p5.CENTER, p5.TOP);
+    //   p5.textSize(32);
+    //   p5.text(displayText, p5.width / 2, p5.height / 2);
+    // }
+    // p5.pop();
+    // const X_MARGIN = Math.floor(p5.width * 0.1); // 10% on each side
+    // p5.push();
+    // {
+    //   p5.stroke("fff");
+    //   p5.line(
+    //     X_MARGIN,
+    //     p5.height / 2 + 36,
+    //     p5.width - X_MARGIN,
+    //     p5.height / 2 + 36,
+    //   );
+    // }
+    // p5.pop();
+  }
+
+  /**
+   * @param {import('p5')} p5
+   * @param {MouseEvent} event
+   */
+  mouseMoved(p5, event) {
+    this.input.mouseMoved(p5, event);
+  }
+
+  /**
+   * @param {import('p5')} p5
+   * @param {MouseEvent} event
+   */
+  mousePressed(p5, event) {
+    this.input.mousePressed(p5, event);
+  }
+
+  /**
+   * @param {import('p5')} p5
+   * @param {MouseEvent} event
+   */
+  mouseReleased(p5, event) {
+    this.input.mouseReleased(p5, event);
   }
 
   /**
@@ -91,10 +137,17 @@ export default class GameScene extends BaseScene {
    * @param {KeyboardEvent} event
    */
   keyPressed(p5, event) {
-    if (event.key === "Backspace") {
-      event.stopPropagation();
-      return new SceneRequest("menu");
-    }
+    this.input.keyPressed(p5, event);
+    if (this.input.focused) return false;
+  }
+
+  /**
+   * @param {import('p5')} p5
+   * @param {KeyboardEvent} event
+   */
+  keyReleased(p5, event) {
+    this.input.keyReleased(p5, event);
+    if (this.input.focused) return false;
   }
 
   /**

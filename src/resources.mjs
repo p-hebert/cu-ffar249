@@ -4,7 +4,7 @@ import FontBook from "src/utils/fonts.mjs";
 export const resources = [
   {
     key: "font:source-sans-3",
-    optional: true,
+    optional: false,
     /** @param {import('p5')} p5 */
     load: () => {
       const fontWeightFiles = {

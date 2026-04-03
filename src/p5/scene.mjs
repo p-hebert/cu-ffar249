@@ -121,6 +121,15 @@ export class BaseScene extends IP5Lifecycle {
    * @param {MouseEvent} event
    * @returns {SceneRequest|Array<SceneRequest>|void}
    */
+  mouseMoved(p5, event) {
+    throw new TypeError("Abstract method 'mouseMoved' must be implemented");
+  }
+
+  /**
+   * @param {import('p5')} p5
+   * @param {MouseEvent} event
+   * @returns {SceneRequest|Array<SceneRequest>|void}
+   */
   mouseClicked(p5, event) {
     throw new TypeError("Abstract method 'mouseClicked' must be implemented");
   }
@@ -386,6 +395,14 @@ export class BaseSceneManager extends IP5Lifecycle {
    */
   keyReleased(p5, event) {
     return this._lifecycle("keyReleased", p5, event);
+  }
+
+  /**
+   * @param {import('p5')} p5
+   * @param {MouseEvent} event
+   */
+  mouseMoved(p5, event) {
+    return this._lifecycle("mouseMoved", p5, event);
   }
 
   /**

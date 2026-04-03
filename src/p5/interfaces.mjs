@@ -54,6 +54,13 @@ export class IP5MouseEventHandler {
    * @param {import('p5')} p5
    * @param {MouseEvent} event
    */
+  mouseMoved(p5, event) {
+    throw new TypeError("Abstract method 'mouseMoved' must be implemented");
+  }
+  /**
+   * @param {import('p5')} p5
+   * @param {MouseEvent} event
+   */
   mouseClicked(p5, event) {
     throw new TypeError("Abstract method 'mouseClicked' must be implemented");
   }
@@ -80,8 +87,8 @@ export class IP5EventHandler {}
 // of the class.
 Object.assign(
   IP5EventHandler.prototype,
-  IP5KeyboardEventHandler,
-  IP5MouseEventHandler,
+  IP5KeyboardEventHandler.prototype,
+  IP5MouseEventHandler.prototype,
 );
 
 export class IP5StatefulDrawable extends IP5Drawable {
@@ -106,4 +113,84 @@ export class IP5StatefulDrawable extends IP5Drawable {
 export class IP5Lifecycle {}
 // Pseudo multiple-inheritance by assigning the methods to the prototype
 // of the class.
-Object.assign(IP5Lifecycle.prototype, IP5Drawable, IP5EventHandler);
+Object.assign(
+  IP5Lifecycle.prototype,
+  IP5Drawable.prototype,
+  IP5EventHandler.prototype,
+);
+
+/**
+ * Interaction-specific interfaces
+ */
+export class IP5Hoverable {
+  /**
+   * @param {import('p5')} p5
+   * @returns {boolean}
+   */
+  isHovered(p5) {
+    throw new TypeError("Abstract method 'isHovered' must be implemented");
+  }
+
+  /**
+   * @param {import('p5')} p5
+   * @param {MouseEvent} event
+   */
+  onHoverStart(p5, event) {
+    throw new TypeError("Abstract method 'onHoverStart' must be implemented");
+  }
+
+  /**
+   * @param {import('p5')} p5
+   * @param {MouseEvent} event
+   */
+  onHoverEnd(p5, event) {
+    throw new TypeError("Abstract method 'onHoverEnd' must be implemented");
+  }
+}
+
+export class IP5Focusable {
+  /**
+   * @param {import('p5')} p5
+   * @param {MouseEvent | KeyboardEvent | null} event
+   */
+  focus(p5, event = null) {
+    throw new TypeError("Abstract method 'focus' must be implemented");
+  }
+
+  /**
+   * @param {import('p5')} p5
+   * @param {MouseEvent | KeyboardEvent | null} event
+   */
+  blur(p5, event = null) {
+    throw new TypeError("Abstract method 'blur' must be implemented");
+  }
+}
+
+export class IP5Clickable {
+  /**
+   * @param {import('p5')} p5
+   * @param {MouseEvent} event
+   */
+  click(p5, event) {
+    throw new TypeError("Abstract method 'click' must be implemented");
+  }
+}
+
+export class IP5TextInput {
+  /**
+   * @param {import('p5')} p5
+   * @param {string} text
+   * @param {KeyboardEvent} event
+   */
+  insertText(p5, text, event) {
+    throw new TypeError("Abstract method 'insertText' must be implemented");
+  }
+
+  /**
+   * @param {import('p5')} p5
+   * @param {KeyboardEvent} event
+   */
+  backspace(p5, event) {
+    throw new TypeError("Abstract method 'backspace' must be implemented");
+  }
+}

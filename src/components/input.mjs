@@ -54,12 +54,27 @@ export default class LineInput extends BaseInteractiveInput {
     this.styles = options.styles ?? {};
     this._onSubmitCallback = options.onSubmitCallback ?? (() => {});
     this._focusedDuration = this.focused ? 0 : null;
+
+    /**
+     * Width of each prefix slice:
+     * prefixWidths[i] = width of text.slice(0, i)
+     * so prefixWidths.length === text.length + 1
+     *
+     * @type {number[]}
+     */
+    this._prefixWidths = [0];
+
+    /**
+     * Cached display metrics used both for rendering and hit-testing.
+     * @type {{ textX: number, textWidth: number, textBottomY: number } | null}
+     */
+    this._layoutCache = null;
   }
 
   get opacity() {
     if (this.disabled) {
       return 0.2;
-    } else if (this.pressed) {
+    } else if (this.pressed && !this.focused) {
       return 0.8;
     } else if (this.focused) {
       return 1;
@@ -82,6 +97,52 @@ export default class LineInput extends BaseInteractiveInput {
    * @param {import('p5')} p5
    */
   setup(p5) {}
+
+  /**
+   * Resolve the nearest caret index from the current mouse position.
+   *
+   * Uses actual input text, not placeholder text.
+   *
+   * @param {import('p5')} p5
+   * @param {MouseEvent} event
+   * @returns {number}
+   */
+  getCursorIndexFromMouse(p5, event) {
+    this._rebuildTextMetrics(p5);
+
+    const text = this.text;
+
+    // Empty input => only valid caret position is 0
+    if (text.length === 0) {
+      return 0;
+    }
+
+    const textX = this._layoutCache?.textX ?? this.x;
+    const localX = p5.mouseX - textX;
+
+    // Clamp to bounds outside the text
+    if (localX <= 0) return 0;
+
+    const totalWidth = this._prefixWidths[text.length];
+    if (localX >= totalWidth) return text.length;
+
+    // Find the closest caret slot between prefix i and prefix i+1
+    for (let i = 0; i < text.length; i++) {
+      const left = this._prefixWidths[i];
+      const right = this._prefixWidths[i + 1];
+      const midpoint = (left + right) / 2;
+
+      if (localX < midpoint) {
+        return i;
+      }
+
+      if (localX >= midpoint && localX < right) {
+        return i + 1;
+      }
+    }
+
+    return text.length;
+  }
 
   /**
    * @param {number} x
@@ -142,26 +203,23 @@ export default class LineInput extends BaseInteractiveInput {
       p5.rect(this.x, this.y + this.h, this.w, 1);
 
       this._applyTextStyles(p5);
+      this._rebuildTextMetrics(p5);
 
-      const textBottomY = this.y + this.h / 2;
-      const textWidth = p5.textWidth(displayText);
-      const textX = this.x + this.w / 2 - textWidth / 2;
+      const padding = this.styles?.padding ?? 2;
+      const displayText = this.getDisplayText();
+      const { textX, textBottomY } = this._layoutCache;
 
       // Selection highlight (only over actual value while focused)
-      if (this.focused && this.hasSelection && this.value) {
-        const before = this.value.slice(0, this.selectionStart);
-        const selected = this.value.slice(
-          this.selectionStart,
-          this.selectionEnd,
-        );
-
-        const selX = textX + p5.textWidth(before);
-        const selW = p5.textWidth(selected);
+      if (this.focused && this.hasSelection && this.text.length > 0) {
+        const selX = textX + this._prefixWidths[this.selectionStart];
+        const selW =
+          this._prefixWidths[this.selectionEnd] -
+          this._prefixWidths[this.selectionStart];
 
         const selectionFill = this.styles?.selectionFill ?? [255, 255, 255, 64];
         p5.noStroke();
         p5.fill(...selectionFill);
-        p5.rect(selX, this.y - 5, selW, textBottomY + 2 - (this.y - 5));
+        p5.rect(selX, this.y - 5, selW, textBottomY + padding - (this.y - 5));
       }
 
       // Text
@@ -170,12 +228,11 @@ export default class LineInput extends BaseInteractiveInput {
 
       // Caret
       if (this.focused && this.cursorVisible) {
-        const beforeCursor = (this.value ?? "").slice(0, this.cursorIndex);
-        const caretX = textX + p5.textWidth(beforeCursor);
+        const caretX = textX + this._prefixWidths[this.cursorIndex];
 
         p5.stroke(255, this.opacity * 255);
         // FIXME: Offsets (0,-5,0,+2) are not dynamically calculated.
-        p5.line(caretX, this.y - 5, caretX, textBottomY + 2);
+        p5.line(caretX, this.y - 5, caretX, textBottomY + padding);
       }
     }
     p5.pop();
@@ -196,7 +253,6 @@ export default class LineInput extends BaseInteractiveInput {
    */
   onFocus(p5, event) {
     this._focusedDuration = 0;
-    this.moveCursorToEnd(false);
   }
 
   /**
@@ -205,5 +261,49 @@ export default class LineInput extends BaseInteractiveInput {
    */
   onBlur(p5, event) {
     this._focusedDuration = null;
+  }
+
+  /**
+   * Recompute cached prefix widths for the current actual input text.
+   *
+   * @param {import('p5')} p5
+   */
+  _rebuildPrefixWidths(p5) {
+    const text = this.text;
+    this._prefixWidths = new Array(text.length + 1);
+    this._prefixWidths[0] = 0;
+
+    for (let i = 1; i <= text.length; i++) {
+      this._prefixWidths[i] = p5.textWidth(text.slice(0, i));
+    }
+  }
+
+  /**
+   * Recompute text layout data used for both draw and click hit-testing.
+   *
+   * @param {import('p5')} p5
+   */
+  _rebuildTextLayoutCache(p5) {
+    const displayText = this.getDisplayText();
+    const textWidth = p5.textWidth(displayText);
+    const textBottomY = this.y + this.h / 2;
+    const textX = this.x + this.w / 2 - textWidth / 2;
+
+    this._layoutCache = {
+      textX,
+      textWidth,
+      textBottomY,
+    };
+  }
+
+  /**
+   * Recompute text measurement caches.
+   *
+   * @param {import('p5')} p5
+   */
+  _rebuildTextMetrics(p5) {
+    this._applyTextStyles(p5);
+    this._rebuildPrefixWidths(p5);
+    this._rebuildTextLayoutCache(p5);
   }
 }

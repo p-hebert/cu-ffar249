@@ -141,6 +141,38 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
     return Math.max(this.selectionAnchor, this.selectionFocus);
   }
 
+  /**
+   * Resolve a caret index from a mouse position inside the component.
+   *
+   * Child classes should implement this using their own text layout logic.
+   *
+   * @param {import('p5')} p5
+   * @param {MouseEvent} event
+   * @returns {number | null | undefined}
+   */
+  getCursorIndexFromMouse(p5, event) {
+    throw new TypeError(
+      "Abstract method 'getCursorIndexFromMouse' must be implemented",
+    );
+  }
+
+  /**
+   * Move the caret to the index resolved by the child class.
+   *
+   * @param {import('p5')} p5
+   * @param {MouseEvent} event
+   * @param {boolean} extendSelection
+   */
+  placeCursorFromMouse(p5, event, extendSelection = false) {
+    if (this.disabled) return;
+
+    const nextIndex = this.getCursorIndexFromMouse(p5, event);
+
+    if (nextIndex === null || nextIndex === undefined) return;
+
+    this.moveCursorTo(nextIndex, extendSelection);
+  }
+
   clear() {
     this.setText("");
     this.moveCursorToEnd(false);
@@ -526,6 +558,8 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
       if (this.focusOnClick) {
         this.focus(p5, event);
       }
+
+      this.placeCursorFromMouse(p5, event, event.shiftKey);
     } else if (this.blurOnOutsideClick) {
       this.blur(p5, event);
     }

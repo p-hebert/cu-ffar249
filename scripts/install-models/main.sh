@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-INSTALL_DIR=../../src/nlp/models
+INSTALL_DIR=../../server/src/nlp/models
 
 poetry install;
 poetry run python -m optimum.exporters.onnx \

@@ -1,8 +1,10 @@
 {
-  "name": "ffar-249-project",
-  "private": true,
+  "name": "app",
   "version": "0.0.0",
+  "license": "CC0-4.0",
+  "private": true,
   "type": "module",
+  "author": "",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

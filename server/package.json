@@ -1,13 +1,15 @@
 {
   "name": "server",
-  "version": "1.0.0",
+  "version": "0.0.0",
+  "license": "CC0-4.0",
+  "private": true,
+  "type": "module",
+  "author": "",
   "main": "src/main.mjs",
+  "description": "",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
-  "license": "CC0-4.0",
-  "description": "",
   "dependencies": {
     "ws": "^8.20.0"
   },

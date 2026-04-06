@@ -1,4 +1,6 @@
+import { AFFECT_ENGINE_URL } from "src/constants.mjs";
 import P5Global from "src/p5/global.mjs";
+import AffectEngineClient from "src/services/affect-engine-client.mjs";
 import FontBook from "src/utils/fonts.mjs";
 
 export const resources = [
@@ -46,6 +48,16 @@ export const resources = [
         promises.push(FontBook.load(p5, key, path));
       }
       return Promise.all(promises);
+    },
+  },
+  {
+    key: "service:affect-engine",
+    optional: false,
+    load: () => {
+      const client = AffectEngineClient.getInstance({
+        url: AFFECT_ENGINE_URL,
+      });
+      return client.connect();
     },
   },
 ];

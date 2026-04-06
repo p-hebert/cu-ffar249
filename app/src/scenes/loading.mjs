@@ -197,7 +197,7 @@ export default class LoadingScene extends BaseScene {
 
     let y = startY;
     for (const resource of visible) {
-      let marker = "…";
+      let marker;
       let suffix = "";
 
       switch (resource.status) {
@@ -227,6 +227,29 @@ export default class LoadingScene extends BaseScene {
 
       p5.text(`${marker} ${resource.key}${suffix}`, x, y);
       y += 20;
+
+      if (resource.status === "ERROR") {
+        const words = resource.error.message.split(" ");
+        let line = "";
+
+        for (let i = 0; i < words.length; i++) {
+          const testLine = line.length === 0 ? words[i] : line + " " + words[i];
+
+          if (testLine.length > 80) {
+            // Draw the current line and start a new one
+            p5.text(line, x + 20, y);
+            y += 20;
+            line = words[i]; // start new line with current word
+          } else {
+            line = testLine;
+          }
+        }
+
+        // Draw any remaining text
+        if (line.length > 0) {
+          p5.text(line, x + 20, y);
+        }
+      }
     }
 
     if (resources.length > visible.length) {

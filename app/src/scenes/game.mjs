@@ -1,5 +1,7 @@
 import LineInput from "src/components/input.mjs";
+import { AFFECT_ENGINE_URL } from "src/constants.mjs";
 import { BaseScene } from "src/p5/scene.mjs";
+import AffectEngineClient from "src/services/affect-engine-client.mjs";
 import FontBook from "src/utils/fonts.mjs";
 
 /**
@@ -18,6 +20,7 @@ export default class GameScene extends BaseScene {
     this._setupped = false;
     this._fontFamily = null;
     this._submittedTexts = [];
+    this._affectEngineClient = null;
   }
 
   /**
@@ -30,7 +33,12 @@ export default class GameScene extends BaseScene {
     if (this._setupped) {
       return;
     }
+    // Get AffectEngineClient
+    this._affectEngineClient = AffectEngineClient.getInstance({
+      url: AFFECT_ENGINE_URL,
+    });
 
+    // Setup LineInput
     this._fontFamily = FontBook.getFamily("source-sans-3");
     const FONT_SIZE = 32;
     const FONT_PADDING = 2;
@@ -57,8 +65,9 @@ export default class GameScene extends BaseScene {
     this._setupped = true;
   }
 
-  onSubmitCallback(value) {
+  async onSubmitCallback(value) {
     if (value === null) return;
+    console.log(await this._affectEngineClient.submitTextAndWait(value));
     this._submittedTexts.unshift(value);
     if (this._submittedTexts.length > 7) this._submittedTexts.pop();
   }

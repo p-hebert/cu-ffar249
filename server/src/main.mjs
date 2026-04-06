@@ -1,51 +1,114 @@
-// server.js
-const WebSocket = require("ws");
+import { WebSocketServer } from "ws";
 
 const PORT = 8080;
 
-// Create a WebSocket server
-const wss = new WebSocket.Server({ port: PORT });
+const wss = new WebSocketServer({ port: PORT });
+const address = wss.address();
+console.log(`LISTENING ws://[${address.address}]:${address.port}`);
 
-console.log(`WebSocket server running on ws://localhost:${PORT}`);
+/**
+ * Generate dummy affect values.
+ * Keeps shape consistent with client expectations.
+ */
+function getDummyAffect(range = { min: null, max: null }) {
+  const base = {
+    valence: 0.2,
+    arousal: 0.5,
+    dominance: 0.3,
+  };
 
-// Handle new connections
+  // Optional normalization if range provided
+  if (range && typeof range.min === "number" && typeof range.max === "number") {
+    const { min, max } = range;
+
+    const scale = (v) => min + (v + 1) * 0.5 * (max - min);
+
+    return {
+      valence: scale(base.valence),
+      arousal: scale(base.arousal),
+      dominance: scale(base.dominance),
+    };
+  }
+
+  return base;
+}
+
 wss.on("connection", (ws, req) => {
   const clientIp = req.socket.remoteAddress;
   console.log(`Client connected: ${clientIp}`);
 
-  // Send a welcome message
-  ws.send(
-    JSON.stringify({
-      type: "connection",
-      message: "Connected to server",
-    }),
-  );
+  ws.on("message", (raw) => {
+    let msg;
 
-  // Handle incoming messages
-  ws.on("message", (data) => {
     try {
-      const message = JSON.parse(data);
-      console.log("Received:", message);
-
-      // Echo back (example behavior)
+      msg = JSON.parse(raw.toString());
+    } catch (err) {
       ws.send(
         JSON.stringify({
-          type: "echo",
-          received: message,
+          type: "error",
+          data: {
+            message: "Invalid JSON payload",
+          },
         }),
       );
-    } catch (err) {
-      console.error("Invalid JSON:", data.toString());
+      return;
     }
+
+    const { id, type, data } = msg || {};
+
+    // Basic validation
+    if (!id || !type) {
+      ws.send(
+        JSON.stringify({
+          type: "error",
+          data: {
+            message: "Missing required fields: id or type",
+          },
+        }),
+      );
+      return;
+    }
+
+    // --- Handle affect analysis ---
+    if (type === "analyze_affect") {
+      const text = data?.text ?? "";
+      const range = data?.range ?? { min: null, max: null };
+
+      console.log(`Affect request [${id}]:`, text);
+
+      const values = getDummyAffect(range);
+
+      const response = {
+        id,
+        type: "affect_result",
+        data: {
+          text,
+          range,
+          values,
+        },
+      };
+
+      ws.send(JSON.stringify(response));
+      return;
+    }
+
+    // --- Unknown type fallback ---
+    ws.send(
+      JSON.stringify({
+        id,
+        type: "error",
+        data: {
+          message: `Unknown message type: ${type}`,
+        },
+      }),
+    );
   });
 
-  // Handle disconnect
   ws.on("close", () => {
     console.log(`Client disconnected: ${clientIp}`);
   });
 
-  // Handle errors
   ws.on("error", (err) => {
-    console.error("WebSocket error:", err);
+    console.error("Socket error:", err);
   });
 });

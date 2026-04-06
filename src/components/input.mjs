@@ -52,6 +52,7 @@ export default class LineInput extends BaseInteractiveInput {
     this.h = options.h;
     this.placeholder = options.placeholder ?? null;
     this.styles = options.styles ?? {};
+    this.styles.fontSize = this.h - 2 * (this.styles?.padding ?? 2) - 1;
     this._onSubmitCallback = options.onSubmitCallback ?? (() => {});
     this._focusedDuration = this.focused ? 0 : null;
 
@@ -181,7 +182,7 @@ export default class LineInput extends BaseInteractiveInput {
     }
 
     p5.textAlign(p5.LEFT, p5.BASELINE);
-    p5.textSize(this.h - 2 * (this.styles?.padding ?? 2) - 1);
+    p5.textSize(this.styles.fontSize);
   }
 
   /**
@@ -191,9 +192,6 @@ export default class LineInput extends BaseInteractiveInput {
     if (this.focused && this._focusedDuration !== null) {
       this._focusedDuration += p5.deltaTime;
     }
-
-    const padding = this.styles?.padding ?? 2;
-    const displayText = this.getDisplayText();
 
     p5.push();
     {

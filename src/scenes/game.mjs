@@ -13,10 +13,11 @@ export default class GameScene extends BaseScene {
 
   constructor() {
     super();
-    this._fontFamily = null;
-    this._setupped = false;
-    this._text = "";
     this.input = null;
+
+    this._setupped = false;
+    this._fontFamily = null;
+    this._submittedTexts = [];
   }
 
   /**
@@ -46,7 +47,7 @@ export default class GameScene extends BaseScene {
       w: INPUT_WIDTH,
       h: INPUT_HEIGHT,
       placeholder: "Share your thoughts",
-      onSubmitCallback: (value) => console.log("Submitted", value),
+      onSubmitCallback: (value) => this.onSubmitCallback(value),
       styles: {
         fontPlaceholder: this._fontFamily["light-italic"],
         fontValue: this._fontFamily["light"],
@@ -54,6 +55,12 @@ export default class GameScene extends BaseScene {
     });
 
     this._setupped = true;
+  }
+
+  onSubmitCallback(value) {
+    if (value === null) return;
+    this._submittedTexts.unshift(value);
+    if (this._submittedTexts.length > 7) this._submittedTexts.pop();
   }
 
   /**
@@ -71,41 +78,29 @@ export default class GameScene extends BaseScene {
   draw(p5) {
     p5.background("black");
     this.input.draw(p5);
+    this._drawSubmittedTexts(p5);
+  }
 
-    // const PLACEHOLDER_TEXT = "Share your thoughts";
-    // let displayText;
-    // p5.push();
-    // {
-    //   if (this._text === "") {
-    //     p5.fill(255, 255, 255, 255 * 0.2);
-    //     if (FontBook.isFont(this._fontFamily?.["black-italic"])) {
-    //       p5.textFont(this._fontFamily?.["black-italic"]);
-    //     }
-    //     displayText = PLACEHOLDER_TEXT;
-    //   } else {
-    //     p5.fill(255, 255, 255);
-    //     if (FontBook.isFont(this._fontFamily?.["regular-italic"])) {
-    //       p5.textFont(this._fontFamily?.["regular-italic"]);
-    //     }
-    //     displayText = this._text;
-    //   }
-    //   p5.textAlign(p5.CENTER, p5.TOP);
-    //   p5.textSize(32);
-    //   p5.text(displayText, p5.width / 2, p5.height / 2);
-    // }
-    // p5.pop();
-    // const X_MARGIN = Math.floor(p5.width * 0.1); // 10% on each side
-    // p5.push();
-    // {
-    //   p5.stroke("fff");
-    //   p5.line(
-    //     X_MARGIN,
-    //     p5.height / 2 + 36,
-    //     p5.width - X_MARGIN,
-    //     p5.height / 2 + 36,
-    //   );
-    // }
-    // p5.pop();
+  _drawSubmittedTexts(p5) {
+    p5.push();
+    {
+      p5.textFont(this.input.styles.fontValue);
+      p5.textAlign(p5.LEFT, p5.BASELINE);
+      p5.textSize(this.input.styles.fontSize);
+      const inputBottomY = this.input.y + this.input.h;
+
+      for (let i = 0; i < this._submittedTexts.length; i += 1) {
+        const text = this._submittedTexts[i];
+        const textWidth = p5.textWidth(text);
+        const textBottomY =
+          inputBottomY + (i + 1) * Math.floor(this.input.h * 1.15);
+        const textX = this.input.x + this.input.w / 2 - textWidth / 2;
+        const textOpacity = 0.5 - i * 0.085;
+        p5.fill(255, textOpacity * 255);
+        p5.text(text, textX, textBottomY);
+      }
+    }
+    p5.pop();
   }
 
   /**

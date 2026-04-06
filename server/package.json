@@ -8,7 +8,11 @@
   "main": "src/main.mjs",
   "description": "",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/main.mjs",
+    "lint": "eslint .",
+    "format": "prettier --write 'src/**/*.{mjs,js,ts,jsx,tsx,json,css,md}' 'tests/**/*.{mjs,js,ts,jsx,tsx,json,css,md}'",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "ws": "^8.20.0"

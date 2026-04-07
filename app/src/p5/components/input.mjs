@@ -64,6 +64,7 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
     this.hovered = false;
     this.focused = options.permanentFocus ?? false;
     this.pressed = false;
+    this.lastTouched = null;
 
     this.blurOnOutsideClick = options.blurOnOutsideClick ?? true;
     this.focusOnClick = options.focusOnClick ?? true;
@@ -621,6 +622,7 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
       !isAlt &&
       key.toLowerCase() === "a"
     ) {
+      this.lastTouched = Date.now();
       this.selectAll();
       return;
     }
@@ -632,6 +634,7 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
       !isAlt &&
       key.toLowerCase() === "c"
     ) {
+      this.lastTouched = Date.now();
       await this.copySelection();
       return;
     }
@@ -643,6 +646,7 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
       !isAlt &&
       key.toLowerCase() === "x"
     ) {
+      this.lastTouched = Date.now();
       await this.cutSelection();
       return;
     }
@@ -654,17 +658,20 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
       !isAlt &&
       key.toLowerCase() === "v"
     ) {
+      this.lastTouched = Date.now();
       await this.pasteClipboard();
       return;
     }
 
     // Start / End
     if (this.enableBoundaryNavigationShortcuts && key === "Home") {
+      this.lastTouched = Date.now();
       this.moveBoundaryStart(isShift);
       return;
     }
 
     if (this.enableBoundaryNavigationShortcuts && key === "End") {
+      this.lastTouched = Date.now();
       this.moveBoundaryEnd(isShift);
       return;
     }
@@ -675,6 +682,7 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
       isPrimaryModifier &&
       key === "ArrowLeft"
     ) {
+      this.lastTouched = Date.now();
       this.moveBoundaryStart(isShift);
       return;
     }
@@ -684,6 +692,7 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
       isPrimaryModifier &&
       key === "ArrowRight"
     ) {
+      this.lastTouched = Date.now();
       this.moveBoundaryEnd(isShift);
       return;
     }
@@ -695,6 +704,7 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
       !isPrimaryModifier &&
       key === "ArrowLeft"
     ) {
+      this.lastTouched = Date.now();
       this.moveCursorWordLeft(isShift);
       return;
     }
@@ -705,33 +715,39 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
       !isPrimaryModifier &&
       key === "ArrowRight"
     ) {
+      this.lastTouched = Date.now();
       this.moveCursorWordRight(isShift);
       return;
     }
 
     // Regular arrow movement / shift-selection
     if (this.enableSelectionShortcuts && key === "ArrowLeft") {
+      this.lastTouched = Date.now();
       this.moveCursorLeft(isShift);
       return;
     }
 
     if (this.enableSelectionShortcuts && key === "ArrowRight") {
+      this.lastTouched = Date.now();
       this.moveCursorRight(isShift);
       return;
     }
 
     if (key === "Backspace") {
+      this.lastTouched = Date.now();
       this.backspace(p5, event);
       return;
     }
 
     if (key === "Delete") {
+      this.lastTouched = Date.now();
       this.deleteForward(p5, event);
       return;
     }
 
     if (key === "Enter") {
       if (this.submitOnEnter) {
+        this.lastTouched = Date.now();
         this.onSubmit(p5, event);
       }
       return;
@@ -743,6 +759,7 @@ export default class BaseInteractiveInput extends IP5Lifecycle {
     }
 
     if (key.length === 1) {
+      this.lastTouched = Date.now();
       this.insertText(p5, key, event);
     }
   }

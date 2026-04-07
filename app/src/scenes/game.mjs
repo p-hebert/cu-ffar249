@@ -13,13 +13,16 @@ export default class GameScene extends BaseScene {
   static key = "game";
   static label = "Game";
 
-  constructor() {
+  constructor({ enableNoInputInterval = true, tickIntervalMs = 5000 } = {}) {
     super();
     this.input = null;
 
     this._setupped = false;
     this._fontFamily = null;
     this._submittedTexts = [];
+    this._enableNoInputInterval = enableNoInputInterval;
+    this._tickIntervalMs = tickIntervalMs;
+    this._tickInterval = null;
     this._affectEngineClient = null;
   }
 
@@ -58,6 +61,18 @@ export default class GameScene extends BaseScene {
         fontValue: this._fontFamily["light"],
       },
     });
+
+    // Setup an interval such that if the input field has not been modified in the last tickIntervalMs,
+    // we submit a "no-input" message to the affect engine to simulate "meditation"/"peace"/"quiet".
+    this._tickInterval = setInterval(() => {
+      const noInputInInterval =
+        this.input.lastTouched === null ||
+        Date.now() - this.input.lastTouched > this._tickIntervalMs;
+      if (this._enableNoInputInterval && noInputInInterval) {
+        console.log("Submitting no-input");
+        this._affectEngineClient.submitText("");
+      }
+    }, this._tickIntervalMs);
 
     this._setupped = true;
   }

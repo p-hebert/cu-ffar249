@@ -2,6 +2,129 @@ import { createActor, createMachine } from "xstate";
 import AbstractAffectEngine from "./AbstractAffectEngine.mjs";
 
 /**
+ * @typedef {"calm" | "uneasy" | "anxious" | "spiraling"} AnxietyScenarioName
+ */
+
+/**
+ * @typedef {"baseline" | "alert" | "spiraling" | "whiteout" | "settling"} AnxietyRegimeName
+ */
+
+/**
+ * Continuous, engine-owned anxiety state.
+ * These values persist across packet ticks.
+ *
+ * @typedef {object} AnxietyEngineState
+ * @property {number} load Broad internal storm pressure / strain.
+ * @property {number} altitude Functional clarity / ability to stay upright.
+ * @property {number} peace Accumulated regulation / groundedness.
+ * @property {number} vigilance Lingering alarm-readiness.
+ * @property {number} spiral Recursive destabilization.
+ * @property {number} freeze Constriction / shutdown under overload.
+ */
+
+/**
+ * Scenario seed config.
+ *
+ * @typedef {object} AnxietyScenarioSeed
+ * @property {AnxietyRegimeName} regime
+ * @property {Partial<AnxietyEngineState>} state
+ */
+
+/**
+ * Human-readable information about a qualitative regime.
+ *
+ * @typedef {object} RegimeInfo
+ * @property {string[]} summary
+ * @property {string} transitionOut
+ */
+
+/**
+ * Regime-specific numeric modifiers.
+ *
+ * @typedef {object} RegimeModifiers
+ * @property {number} threatGain
+ * @property {number} regulationGain
+ * @property {number} vigilanceGain
+ * @property {number} spiralGain
+ * @property {number} loadGain
+ * @property {number} freezeGain
+ * @property {number} peaceGain
+ * @property {number} altitudeGain
+ * @property {number} noInputRecoveryGain
+ */
+
+/**
+ * Normalized transport packet expected by the engine.
+ *
+ * @typedef {object} AffectPacket
+ * @property {"affect" | "idle"} type
+ * @property {unknown} value
+ * @property {{
+ *   correlationId?: string | null,
+ *   source?: string | null,
+ *   [key: string]: unknown
+ * }} [meta]
+ */
+
+/**
+ * Base VAD packet interpretation.
+ *
+ * @typedef {object} BaseDerivedInput
+ * @property {"affect" | "no-input"} kind
+ * @property {boolean} hasSignal
+ * @property {number} valence
+ * @property {number} arousal
+ * @property {number} dominance
+ */
+
+/**
+ * Anxiety-specific packet interpretation.
+ * These values are per-packet cues, not persistent engine memory.
+ *
+ * @typedef {BaseDerivedInput & {
+ *   threatCue: number,
+ *   reliefCue: number,
+ *   griefCue: number,
+ *   shockCue: number,
+ *   peaceCue: number,
+ *   alarm: number,
+ *   destabilization: number,
+ *   regulation: number
+ * }} AnxietyDerivedInput
+ */
+
+/**
+ * Public semantic signals emitted to downstream consumers.
+ * This intentionally mixes:
+ * - persistent engine state
+ * - current packet interpretation
+ * - a few useful derived composites
+ *
+ * @typedef {object} AnxietySignals
+ * @property {AnxietyRegimeName | string} regime
+ * @property {number} load
+ * @property {number} altitude
+ * @property {number} peace
+ * @property {number} vigilance
+ * @property {number} spiral
+ * @property {number} freeze
+ * @property {number} valence
+ * @property {number} arousal
+ * @property {number} dominance
+ * @property {number} threatCue
+ * @property {number} reliefCue
+ * @property {number} griefCue
+ * @property {number} shockCue
+ * @property {number} peaceCue
+ * @property {number} alarm
+ * @property {number} destabilization
+ * @property {number} regulation
+ * @property {number} instability
+ * @property {number} constriction
+ * @property {number} recoveryReadiness
+ */
+
+/**
  * AnxietyAffectEngine
  *
  * Phenomenological focus:
@@ -18,6 +141,9 @@ import AbstractAffectEngine from "./AbstractAffectEngine.mjs";
  * - relief / peace help, but only gradually
  */
 export default class AnxietyAffectEngine extends AbstractAffectEngine {
+  /**
+   * @type {Record<AnxietyRegimeName, RegimeInfo>}
+   */
   static REGIME_INFO = {
     baseline: {
       summary: [
@@ -67,10 +193,20 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
     },
   };
 
+  /**
+   * @param {{
+   *   scenario?: AnxietyScenarioName | null,
+   *   logger?: { logTick?: (prevPublicState: unknown, nextPublicState: unknown) => void } | null,
+   *   debug?: boolean,
+   *   [key: string]: unknown
+   * }} [config={}]
+   */
   constructor(config = {}) {
     super(config);
 
-    const scenario = this.getScenarioState(config.scenario);
+    const scenario = this.getScenarioState(
+      /** @type {AnxietyScenarioName | null | undefined} */ (config.scenario),
+    );
 
     this.state = {
       ...this.state,
@@ -85,11 +221,41 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
     this.actor = createActor(this.machine);
     this.actor.start();
 
-    this.state.regime = this.getRegime();
     this._lastMachineStateValue = this.getRegime();
+    this._attachScenarioActorTransitionLogger();
   }
 
+  /**
+   * Re-attach transition logging after restarting the actor for a scenario.
+   *
+   * @returns {void}
+   */
+  _attachScenarioActorTransitionLogger() {
+    if (!this.actor) return;
+
+    this.actor.subscribe((snapshot) => {
+      const nextValue =
+        typeof snapshot.value === "string"
+          ? snapshot.value
+          : JSON.stringify(snapshot.value);
+
+      if (nextValue !== this._lastMachineStateValue) {
+        this.onRegimeTransition(
+          this._lastMachineStateValue,
+          nextValue,
+          snapshot,
+        );
+        this._lastMachineStateValue = nextValue;
+      }
+    });
+  }
+
+  /**
+   * @param {AnxietyScenarioName | null | undefined} name
+   * @returns {AnxietyScenarioSeed}
+   */
   getScenarioState(name) {
+    /** @type {Record<AnxietyScenarioName, AnxietyScenarioSeed>} */
     const scenarios = {
       calm: {
         regime: "baseline",
@@ -100,10 +266,6 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
           vigilance: 0.08,
           spiral: 0.02,
           freeze: 0.0,
-          threat: 0.05,
-          arousal: 0.18,
-          dominance: 0.7,
-          valence: 0.62,
         },
       },
 
@@ -116,10 +278,6 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
           vigilance: 0.38,
           spiral: 0.1,
           freeze: 0.02,
-          threat: 0.32,
-          arousal: 0.46,
-          dominance: 0.44,
-          valence: 0.46,
         },
       },
 
@@ -132,10 +290,6 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
           vigilance: 0.66,
           spiral: 0.24,
           freeze: 0.08,
-          threat: 0.58,
-          arousal: 0.74,
-          dominance: 0.24,
-          valence: 0.28,
         },
       },
 
@@ -148,16 +302,12 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
           vigilance: 0.78,
           spiral: 0.72,
           freeze: 0.14,
-          threat: 0.7,
-          arousal: 0.84,
-          dominance: 0.16,
-          valence: 0.22,
         },
       },
     };
 
     return (
-      scenarios[name] ?? {
+      scenarios[name ?? "calm"] ?? {
         regime: "baseline",
         state: {},
       }
@@ -167,28 +317,24 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
   /**
    * Initial continuous state.
    *
-   * @returns {object}
+   * @returns {AnxietyEngineState}
    */
   initializeState() {
     return {
-      load: 0.2, // total internal strain
-      altitude: 0.45, // functional clarity / ability to stay upright
-      peace: 0.25, // regulation / groundedness
-      vigilance: 0.2, // lingering alarm readiness
-      spiral: 0.0, // escalating recursive destabilization
-      freeze: 0.0, // shutdown / constriction under overload
-      threat: 0.0,
-      arousal: 0.0,
-      dominance: 0.5,
-      valence: 0.5,
-      regime: "baseline",
+      load: 0.2,
+      altitude: 0.45,
+      peace: 0.25,
+      vigilance: 0.2,
+      spiral: 0.0,
+      freeze: 0.0,
     };
   }
 
   /**
    * XState machine for qualitative regimes.
    *
-   * @returns {object}
+   * @param {AnxietyRegimeName} [initial="baseline"]
+   * @returns {import("xstate").AnyStateMachine}
    */
   createMachine(initial = "baseline") {
     return createMachine({
@@ -212,7 +358,7 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
                 target: "alert",
                 guard: ({ event }) =>
                   event.engineState.vigilance >= 0.45 ||
-                  event.engineState.threat >= 0.4,
+                  event.derivedInput.threatCue >= 0.4,
               },
             ],
           },
@@ -229,7 +375,7 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
                 target: "spiraling",
                 guard: ({ event }) =>
                   event.engineState.spiral >= 0.62 &&
-                  event.engineState.arousal >= 0.65,
+                  event.derivedInput.arousal >= 0.65,
               },
               {
                 target: "baseline",
@@ -254,7 +400,7 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
                 guard: ({ event }) =>
                   event.engineState.spiral < 0.35 &&
                   event.engineState.vigilance < 0.55 &&
-                  event.engineState.peace > 0.45,
+                  event.engineState.peace > 0.3,
               },
             ],
           },
@@ -267,7 +413,7 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
                 target: "settling",
                 guard: ({ event }) =>
                   event.engineState.load < 0.72 &&
-                  event.engineState.arousal < 0.58,
+                  event.derivedInput.arousal < 0.58,
               },
             ],
           },
@@ -284,13 +430,13 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
                 target: "spiraling",
                 guard: ({ event }) =>
                   event.engineState.spiral >= 0.6 &&
-                  event.engineState.arousal >= 0.65,
+                  event.derivedInput.arousal >= 0.65,
               },
               {
                 target: "alert",
                 guard: ({ event }) =>
                   event.engineState.vigilance >= 0.48 ||
-                  event.engineState.threat >= 0.45,
+                  event.derivedInput.threatCue >= 0.45,
               },
               {
                 target: "baseline",
@@ -309,8 +455,8 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
   /**
    * Normalize packet shape a bit more strictly.
    *
-   * @param {object} packet
-   * @returns {object}
+   * @param {AffectPacket} packet
+   * @returns {AffectPacket}
    */
   normalizePacket(packet) {
     const normalized = super.normalizePacket(packet);
@@ -329,11 +475,11 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
   /**
    * Anxiety-specific derived input.
    *
-   * We keep the base VAD/emotion derivation, then add a few
-   * anxiety-centered composite signals.
+   * We keep the base VAD derivation, then add a few
+   * anxiety-centered packet cues.
    *
-   * @param {object} packet
-   * @returns {object}
+   * @param {AffectPacket} packet
+   * @returns {AnxietyDerivedInput}
    */
   computeDerivedInput(packet) {
     const base = super.computeDerivedInput(packet);
@@ -341,7 +487,16 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
 
     if (!base.hasSignal) {
       return {
-        ...base,
+        kind: "no-input",
+        hasSignal: false,
+        valence: 0,
+        arousal: 0,
+        dominance: 0,
+        threatCue: 0,
+        reliefCue: 0,
+        griefCue: 0,
+        shockCue: 0,
+        peaceCue: 0,
         alarm: 0,
         destabilization: 0,
         regulation: 0,
@@ -351,49 +506,54 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
     const lowValence = 1 - base.valence;
     const lowDominance = 1 - base.dominance;
 
-    const threat = this._clamp01(
+    const threatCue = this._clamp01(
       (base.arousal * 0.5 + lowDominance * 0.35 + lowValence * 0.15) *
         m.threatGain,
     );
 
-    const relief = this._clamp01(
+    const reliefCue = this._clamp01(
       base.valence * 0.55 + base.dominance * 0.3 + (1 - base.arousal) * 0.15,
     );
 
-    const grief = this._clamp01(
+    const griefCue = this._clamp01(
       lowValence * 0.55 + lowDominance * 0.25 + (1 - base.arousal) * 0.2,
     );
 
-    const shock = this._clamp01(
+    const shockCue = this._clamp01(
       base.arousal * 0.6 +
         lowDominance * 0.25 +
         Math.max(0, 0.5 - base.valence) * 0.15,
     );
 
-    const peace = this._clamp01(
+    const peaceCue = this._clamp01(
       ((1 - base.arousal) * 0.45 + base.dominance * 0.35 + base.valence * 0.2) *
         m.peaceGain,
     );
 
     const alarm = this._clamp01(
-      threat * 0.6 + base.arousal * 0.25 + lowDominance * 0.15,
+      threatCue * 0.6 + base.arousal * 0.25 + lowDominance * 0.15,
     );
 
     const destabilization = this._clamp01(
-      base.arousal * 0.45 + shock * 0.3 + lowDominance * 0.25,
+      base.arousal * 0.45 + shockCue * 0.3 + lowDominance * 0.25,
     );
 
     const regulation = this._clamp01(
-      (peace * 0.6 + relief * 0.25 + base.dominance * 0.15) * m.regulationGain,
+      (peaceCue * 0.6 + reliefCue * 0.25 + base.dominance * 0.15) *
+        m.regulationGain,
     );
 
     return {
-      ...base,
-      threat,
-      grief,
-      relief,
-      shock,
-      peace,
+      kind: "affect",
+      hasSignal: true,
+      valence: base.valence,
+      arousal: base.arousal,
+      dominance: base.dominance,
+      threatCue,
+      reliefCue,
+      griefCue,
+      shockCue,
+      peaceCue,
       alarm,
       destabilization,
       regulation,
@@ -403,8 +563,9 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
   /**
    * Reduce one packet-step into the continuous anxiety state.
    *
-   * @param {object} packet
-   * @param {object} input
+   * @param {AffectPacket} packet
+   * @param {AnxietyDerivedInput} input
+   * @returns {void}
    */
   reduce(packet, input) {
     const noInput = !input.hasSignal;
@@ -416,10 +577,6 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
     const prevFreeze = this.state.freeze;
     const prevPeace = this.state.peace;
     const prevAltitude = this.state.altitude;
-    const prevThreat = this.state.threat;
-    const prevArousal = this.state.arousal;
-    const prevDominance = this.state.dominance;
-    const prevValence = this.state.valence;
 
     if (noInput) {
       this.state.load = this._clamp01(
@@ -441,7 +598,9 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
       );
 
       this.state.peace = this._clamp01(
-        prevPeace * 0.92 + (1 - this.state.load) * 0.05 * m.noInputRecoveryGain,
+        prevPeace * 0.9 +
+          (1 - this.state.load) * 0.05 * m.noInputRecoveryGain +
+          (1 - this.state.vigilance) * 0.01,
       );
 
       this.state.altitude = this._clamp01(
@@ -450,24 +609,9 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
           this.state.freeze * 0.02,
       );
 
-      this.state.threat = this._clamp01(prevThreat * 0.9);
-      this.state.arousal = this._clamp01(prevArousal * 0.92);
-
-      this.state.dominance = this._clamp01(
-        prevDominance * 0.98 +
-          (1 - this.state.vigilance) * 0.01 * m.noInputRecoveryGain,
-      );
-
-      this.state.valence = this._clamp01(prevValence * 0.99);
-
       this.applyRegimeConstraints();
       return;
     }
-
-    this.state.threat = input.threat;
-    this.state.arousal = input.arousal;
-    this.state.dominance = input.dominance;
-    this.state.valence = input.valence;
 
     const lowDominance = 1 - input.dominance;
 
@@ -508,7 +652,7 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
     this.state.altitude = this._clamp01(
       prevAltitude * 0.56 +
         input.dominance * 0.18 * m.altitudeGain +
-        input.relief * 0.14 * m.altitudeGain +
+        input.reliefCue * 0.14 * m.altitudeGain +
         this.state.peace * 0.16 * m.altitudeGain -
         this.state.load * 0.1 -
         this.state.freeze * 0.08,
@@ -520,8 +664,9 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
   /**
    * Push one packet-step into the qualitative XState machine.
    *
-   * @param {object} packet
-   * @param {object} derivedInput
+   * @param {AffectPacket} packet
+   * @param {AnxietyDerivedInput} derivedInput
+   * @returns {void}
    */
   stepStateMachine(packet, derivedInput) {
     this.sendMachineEvent({
@@ -540,36 +685,55 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
    * (frontend visuals, MaxMSP audio, debug tools)
    * can map however they want.
    *
-   * @returns {object}
+   * @returns {AnxietySignals}
    */
   getSignals() {
+    const input = /** @type {Partial<AnxietyDerivedInput> | null} */ (
+      this.derivedInput
+    );
+
+    const valence = input?.valence ?? 0;
+    const arousal = input?.arousal ?? 0;
+    const dominance = input?.dominance ?? 0;
+    const threatCue = input?.threatCue ?? 0;
+    const reliefCue = input?.reliefCue ?? 0;
+    const griefCue = input?.griefCue ?? 0;
+    const shockCue = input?.shockCue ?? 0;
+    const peaceCue = input?.peaceCue ?? 0;
+    const alarm = input?.alarm ?? 0;
+    const destabilization = input?.destabilization ?? 0;
+    const regulation = input?.regulation ?? 0;
+
     return {
       regime: this.getRegime(),
 
       load: this.state.load,
       altitude: this.state.altitude,
       peace: this.state.peace,
-
       vigilance: this.state.vigilance,
       spiral: this.state.spiral,
       freeze: this.state.freeze,
 
-      threat: this.state.threat,
-      arousal: this.state.arousal,
-      dominance: this.state.dominance,
-      valence: this.state.valence,
+      valence,
+      arousal,
+      dominance,
+      threatCue,
+      reliefCue,
+      griefCue,
+      shockCue,
+      peaceCue,
+      alarm,
+      destabilization,
+      regulation,
 
-      // Optional semantic composites
       instability: this._clamp01(
         this.state.spiral * 0.6 + this.state.vigilance * 0.4,
       ),
       constriction: this._clamp01(
-        this.state.freeze * 0.7 + (1 - this.state.dominance) * 0.3,
+        this.state.freeze * 0.7 + (1 - dominance) * 0.3,
       ),
       recoveryReadiness: this._clamp01(
-        this.state.peace * 0.5 +
-          this.state.altitude * 0.3 +
-          this.state.dominance * 0.2,
+        this.state.peace * 0.5 + this.state.altitude * 0.3 + dominance * 0.2,
       ),
     };
   }
@@ -577,7 +741,8 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
   /**
    * Optional tighter validation.
    *
-   * @param {object} packet
+   * @param {AffectPacket} packet
+   * @returns {void}
    */
   validatePacket(packet) {
     super.validatePacket(packet);
@@ -590,15 +755,24 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
     }
   }
 
+  /**
+   * @param {AnxietyRegimeName | string} [regime=this.getRegime()]
+   * @returns {RegimeInfo}
+   */
   getRegimeInfo(regime = this.getRegime()) {
     return (
-      AnxietyAffectEngine.REGIME_INFO[regime] ?? {
+      AnxietyAffectEngine.REGIME_INFO[
+        /** @type {AnxietyRegimeName} */ (regime)
+      ] ?? {
         summary: ["No regime description available"],
         transitionOut: "No transition hint available",
       }
     );
   }
 
+  /**
+   * @returns {RegimeModifiers}
+   */
   getRegimeModifiers() {
     switch (this.getRegime()) {
       case "baseline":
@@ -630,14 +804,14 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
       case "spiraling":
         return {
           threatGain: 1.1,
-          regulationGain: 0.78,
+          regulationGain: 0.9,
           vigilanceGain: 1.12,
           spiralGain: 1.28,
           loadGain: 1.18,
           freezeGain: 1.08,
-          peaceGain: 0.82,
-          altitudeGain: 0.88,
-          noInputRecoveryGain: 0.8,
+          peaceGain: 0.95,
+          altitudeGain: 0.92,
+          noInputRecoveryGain: 1.1,
         };
 
       case "whiteout":
@@ -681,6 +855,11 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
     }
   }
 
+  /**
+   * Apply hard/soft caps implied by the current regime.
+   *
+   * @returns {void}
+   */
   applyRegimeConstraints() {
     switch (this.getRegime()) {
       case "whiteout": {
@@ -713,11 +892,56 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
     }
   }
 
+  /**
+   * @param {AnxietyRegimeName | string} regime
+   * @returns {string[]}
+   */
+  getRegimeConstraintSummary(regime) {
+    switch (regime) {
+      case "whiteout":
+        return [
+          "Calming statements and no-inputs have barely any effect",
+          "Load and vigilance are prevented from dropping too low",
+          "Peace and altitude are capped and recover very slowly",
+        ];
+
+      case "spiraling":
+        return [
+          "Recursive destabilization keeps amplifying pressure",
+          "Peace cannot rise freely while spiral remains active",
+          "Spiral is prevented from collapsing too quickly",
+        ];
+
+      case "alert":
+        return [
+          "The system remains biased toward vigilance",
+          "Threat is interpreted more aggressively than in baseline",
+        ];
+
+      case "settling":
+        return [
+          "Recovery signals gain traction",
+          "Spiral is softly constrained downward",
+        ];
+
+      case "baseline":
+      default:
+        return ["No special caps or amplification are applied"];
+    }
+  }
+
+  /**
+   * @param {AnxietyRegimeName | string} prevRegime
+   * @param {AnxietyRegimeName | string} nextRegime
+   * @param {import("xstate").Snapshot<unknown>} snapshot
+   * @returns {void}
+   */
   onRegimeTransition(prevRegime, nextRegime, snapshot) {
     if (!this.debug) return;
 
     const s = this.state;
     const info = this.getRegimeInfo(nextRegime);
+    const constraints = this.getRegimeConstraintSummary(nextRegime);
 
     console.log(
       `\x1b[35m[AnxietyAffectEngine]\x1b[0m transition: ` +
@@ -734,6 +958,11 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
 
     console.log("  State:");
     for (const line of info.summary) {
+      console.log(`    - ${line}`);
+    }
+
+    console.log("  Constraints:");
+    for (const line of constraints) {
       console.log(`    - ${line}`);
     }
 

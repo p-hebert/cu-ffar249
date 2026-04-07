@@ -1,5 +1,3 @@
-// AffectEngineClient.js
-
 /**
  * @typedef {Object} AffectRange
  * @property {number | null} min
@@ -482,7 +480,7 @@ export default class AffectEngineClient {
     let parsed;
     try {
       parsed = JSON.parse(rawData);
-    } catch (error) {
+    } catch (_) {
       this._emit("error", new Error(`Failed to parse server JSON: ${rawData}`));
       return;
     }
@@ -518,11 +516,12 @@ export default class AffectEngineClient {
       payload.data &&
       typeof payload.data === "object" &&
       "values" in payload.data &&
-      payload.data.values &&
-      typeof payload.data.values === "object" &&
-      typeof payload.data.values.valence === "number" &&
-      typeof payload.data.values.arousal === "number" &&
-      typeof payload.data.values.dominance === "number",
+      (payload.data.values === null ||
+        (payload.data.values &&
+          typeof payload.data.values === "object" &&
+          typeof payload.data.values.valence === "number" &&
+          typeof payload.data.values.arousal === "number" &&
+          typeof payload.data.values.dominance === "number")),
     );
   }
 

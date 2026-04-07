@@ -1,6 +1,6 @@
 import { AFFECT_ENGINE_URL } from "src/constants.mjs";
 import P5Global from "src/p5/global.mjs";
-import AffectEngineClient from "src/services/affect-engine-client.mjs";
+import AffectEngineClient from "src/services/affect-engine";
 import FontBook from "src/utils/fonts.mjs";
 
 export const resources = [

@@ -8,9 +8,10 @@
   "main": "src/main.mjs",
   "description": "",
   "scripts": {
-    "start": "node src/main.mjs",
+    "dev": "nodemon --watch src --ext mjs,js,ts --exec \"node src/main.mjs\"",
     "lint": "eslint .",
     "format": "prettier --write 'src/**/*.{mjs,js,ts,jsx,tsx,json,css,md}' 'tests/**/*.{mjs,js,ts,jsx,tsx,json,css,md}'",
+    "start": "node src/main.mjs",
     "test": "jest",
     "test:watch": "jest --watch"
   },
@@ -22,6 +23,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.2.0",
+    "nodemon": "^3.1.14",
     "prettier": "^3.8.1"
   }
 }

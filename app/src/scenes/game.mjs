@@ -1,7 +1,7 @@
 import LineInput from "src/components/input.mjs";
 import { AFFECT_ENGINE_URL } from "src/constants.mjs";
 import { BaseScene } from "src/p5/scene.mjs";
-import AffectEngineClient from "src/services/affect-engine-client.mjs";
+import AffectEngineClient from "src/services/affect-engine";
 import FontBook from "src/utils/fonts.mjs";
 
 /**
@@ -46,9 +46,6 @@ export default class GameScene extends BaseScene {
     const INPUT_X_MARGIN = Math.floor(p5.width * 0.1); // 10% on each side
     const INPUT_WIDTH = p5.width - 2 * INPUT_X_MARGIN;
 
-    for (let [style, font] of Object.entries(this._fontFamily)) {
-      console.log(style, font, FontBook.isFont(font));
-    }
     this.input = new LineInput({
       x: INPUT_X_MARGIN,
       y: p5.height / 2,

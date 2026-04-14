@@ -12,13 +12,48 @@
  */
 
 /**
+ * Reduced renderer-facing public signals.
+ *
+ * @typedef {Object} AffectSignals
+ * @property {string} regime
+ * @property {number} load
+ * @property {number} altitude
+ * @property {number} peace
+ * @property {number} activation
+ * @property {number} constriction
+ * @property {number} instability
+ */
+
+/**
+ * Public affect engine state returned by the server/runtime.
+ *
+ * Shape is intentionally loose here because each engine may expose
+ * a slightly different internal state/debug payload over time.
+ *
+ * @typedef {Object} AffectPublicState
+ * @property {string} engine
+ * @property {number} tickCount
+ * @property {boolean} active
+ * @property {string} regime
+ * @property {Record<string, number>} state
+ * @property {AffectSignals} signals
+ * @property {unknown} packet
+ * @property {unknown} derivedInput
+ */
+
+/**
  * @typedef {Object} AffectPayload
  * @property {string} id
  * @property {string} type
  * @property {{
  *   text?: string,
  *   range?: AffectRange,
- *   values?: AffectValues,
+ *   values?: AffectValues | null,
+ *   engineType?: string,
+ *   scenario?: string | null,
+ *   debug?: boolean,
+ *   publicState?: AffectPublicState,
+ *   signals?: AffectSignals,
  *   [key: string]: any
  * }} data
  */
@@ -26,32 +61,20 @@
 import WebSocket from "ws";
 
 /**
- * Browser-side WebSocket client for an affect engine.
+ * WebSocket client for the affect engine server/runtime.
  *
- * Expected outbound shape:
- * {
- *   id,
- *   type,
- *   data: {
- *     text,
- *     range: { min, max }
- *   }
- * }
+ * Supported outbound messages:
+ * - analyze_affect
+ * - switch_affect_engine
+ * - switch_affect_scenario
+ * - reset_affect_engine
  *
- * Expected inbound affect result shape:
- * {
- *   id,
- *   type: "affect_result",
- *   data: {
- *     text,
- *     range: { min, max },
- *     values: {
- *       valence,
- *       arousal,
- *       dominance
- *     }
- *   }
- * }
+ * Supported inbound messages:
+ * - affect_result
+ * - affect_engine_switched
+ * - affect_scenario_switched
+ * - affect_engine_reset
+ * - error
  */
 export default class AffectEngineClient {
   static #_cached_instances = new Map();
@@ -93,7 +116,6 @@ export default class AffectEngineClient {
       instance.#_cacheKey,
     );
 
-    // Only delete if the cache still points to this exact instance
     if (cached === instance) {
       AffectEngineClient.#_cached_instances.delete(instance.#_cacheKey);
     }
@@ -120,6 +142,9 @@ export default class AffectEngineClient {
     /** @type {WebSocket | null} */
     this.ws = null;
 
+    /** @type {Promise<void> | null} */
+    this._connectPromise = null;
+
     /** @type {boolean} */
     this._manuallyClosed = false;
 
@@ -130,7 +155,7 @@ export default class AffectEngineClient {
     this._sendQueue = [];
 
     /**
-     * Latest affect state received from server.
+     * Latest affect/control payload received from server.
      * @type {AffectPayload | null}
      */
     this._latestAffect = null;
@@ -158,14 +183,14 @@ export default class AffectEngineClient {
   /**
    * Opens the websocket connection.
    * Safe to call multiple times.
+   *
+   * @returns {Promise<void>}
    */
   connect() {
-    // If already open → resolve immediately
     if (this.ws?.readyState === WebSocket.OPEN) {
       return Promise.resolve();
     }
 
-    // If already connecting → reuse same promise
     if (this._connectPromise) {
       return this._connectPromise;
     }
@@ -198,10 +223,8 @@ export default class AffectEngineClient {
 
       const handleError = (error) => {
         cleanup();
-
         this._connectPromise = null;
 
-        // Build the most precise message possible
         let message = "WebSocket connection error";
 
         if (error instanceof Error) {
@@ -209,18 +232,17 @@ export default class AffectEngineClient {
         } else if (error?.message) {
           message = error.message;
         } else if (error?.type === "error") {
-          // Browser WebSocket errors are often generic Event objects
           message =
             "WebSocket error event (connection may have failed, been refused, or blocked)";
         }
 
-        // Add contextual hints (very useful in browser)
         if (this.url) {
           try {
             const urlObj = new URL(this.url);
 
             if (
               urlObj.protocol === "ws:" &&
+              typeof window !== "undefined" &&
               window.location.protocol === "https:"
             ) {
               message +=
@@ -253,7 +275,6 @@ export default class AffectEngineClient {
         const wasNeverOpened = this.ws?.readyState !== WebSocket.OPEN;
 
         if (wasNeverOpened) {
-          // Initial connection failed → reject + purge
           cleanup();
 
           this._connectPromise = null;
@@ -263,20 +284,15 @@ export default class AffectEngineClient {
           return;
         }
 
-        // Connection was previously open → runtime close
         if (!this.autoReconnect) {
-          // No reconnect strategy → this instance is effectively dead
           AffectEngineClient.#_purgeCachedInstance(this);
         }
-        // else autoReconnect === true:
-        // DO NOT purge (instance is still logically alive)
       };
 
       this.ws.addEventListener("open", handleOpen);
       this.ws.addEventListener("error", handleError);
       this.ws.addEventListener("close", handleClose);
 
-      // --- existing listeners (keep these) ---
       this.ws.addEventListener("message", (event) => {
         this._handleMessage(event.data);
       });
@@ -361,8 +377,6 @@ export default class AffectEngineClient {
   /**
    * Send plain text and await a matching response by id.
    *
-   * Assumes server echoes the same request id back.
-   *
    * @param {string} text
    * @param {Object} [options]
    * @param {number | null} [options.min=null]
@@ -375,10 +389,12 @@ export default class AffectEngineClient {
     text,
     { min = null, max = null, type = "analyze_affect", timeoutMs = 5000 } = {},
   ) {
-    const id = crypto.randomUUID();
+    if (typeof text !== "string") {
+      throw new Error("submitTextAndWait(text): text must be a string.");
+    }
 
     const payload = {
-      id,
+      id: crypto.randomUUID(),
       type,
       data: {
         text,
@@ -386,15 +402,152 @@ export default class AffectEngineClient {
       },
     };
 
-    return new Promise((resolve, reject) => {
-      const timeoutId = window.setTimeout(() => {
-        this._pendingRequests.delete(id);
-        reject(new Error(`Timed out waiting for response to request ${id}`));
-      }, timeoutMs);
+    return this._sendAndWait(payload, timeoutMs);
+  }
 
-      this._pendingRequests.set(id, { resolve, reject, timeoutId });
-      this.send(payload);
-    });
+  /**
+   * Switch to a different affect engine.
+   *
+   * This is a clean-slate switch on the server/runtime side.
+   *
+   * @param {"anxiety" | "burnout" | "depression"} engineType
+   * @param {string | null} [scenario=null]
+   * @returns {string} request id
+   */
+  switchEngine(engineType, scenario = null) {
+    if (typeof engineType !== "string" || engineType.trim() === "") {
+      throw new Error(
+        "switchEngine(engineType): engineType must be a non-empty string.",
+      );
+    }
+
+    const payload = {
+      id: crypto.randomUUID(),
+      type: "switch_affect_engine",
+      data: {
+        engineType,
+        scenario,
+      },
+    };
+
+    this.send(payload);
+    return payload.id;
+  }
+
+  /**
+   * Switch to a different affect engine and wait for the server response.
+   *
+   * @param {"anxiety" | "burnout" | "depression"} engineType
+   * @param {string | null} [scenario=null]
+   * @param {number} [timeoutMs=5000]
+   * @returns {Promise<AffectPayload>}
+   */
+  switchEngineAndWait(engineType, scenario = null, timeoutMs = 5000) {
+    if (typeof engineType !== "string" || engineType.trim() === "") {
+      throw new Error(
+        "switchEngineAndWait(engineType): engineType must be a non-empty string.",
+      );
+    }
+
+    const payload = {
+      id: crypto.randomUUID(),
+      type: "switch_affect_engine",
+      data: {
+        engineType,
+        scenario,
+      },
+    };
+
+    return this._sendAndWait(payload, timeoutMs);
+  }
+
+  /**
+   * Switch only the scenario for the current affect engine.
+   *
+   * This is also a clean-slate recreate on the server/runtime side.
+   *
+   * @param {string | null} scenario
+   * @returns {string} request id
+   */
+  switchScenario(scenario) {
+    const payload = {
+      id: crypto.randomUUID(),
+      type: "switch_affect_scenario",
+      data: {
+        scenario,
+      },
+    };
+
+    this.send(payload);
+    return payload.id;
+  }
+
+  /**
+   * Switch only the scenario for the current affect engine and wait for response.
+   *
+   * @param {string | null} scenario
+   * @param {number} [timeoutMs=5000]
+   * @returns {Promise<AffectPayload>}
+   */
+  switchScenarioAndWait(scenario, timeoutMs = 5000) {
+    const payload = {
+      id: crypto.randomUUID(),
+      type: "switch_affect_scenario",
+      data: {
+        scenario,
+      },
+    };
+
+    return this._sendAndWait(payload, timeoutMs);
+  }
+
+  /**
+   * Reset the current affect engine.
+   *
+   * Behavior depends on server/runtime:
+   * - omitted scenario: reset using current scenario
+   * - null scenario: reset with no scenario override
+   * - string scenario: reset with that scenario
+   *
+   * @param {string | null | undefined} [scenario=undefined]
+   * @returns {string} request id
+   */
+  resetEngine(scenario = undefined) {
+    const payload = {
+      id: crypto.randomUUID(),
+      type: "reset_affect_engine",
+      data:
+        scenario === undefined
+          ? {}
+          : {
+              scenario,
+            },
+    };
+
+    this.send(payload);
+    return payload.id;
+  }
+
+  /**
+   * Reset the current affect engine and wait for response.
+   *
+   * @param {string | null | undefined} [scenario=undefined]
+   * @param {number} [timeoutMs=5000]
+   * @returns {Promise<AffectPayload>}
+   */
+  resetEngineAndWait(scenario = undefined, timeoutMs = 5000) {
+    const payload = {
+      id: crypto.randomUUID(),
+      type: "reset_affect_engine",
+      data:
+        scenario === undefined
+          ? {}
+          : {
+              scenario,
+            },
+    };
+
+    return this._sendAndWait(payload, timeoutMs);
   }
 
   /**
@@ -414,7 +567,28 @@ export default class AffectEngineClient {
   }
 
   /**
-   * Get the latest affect payload received from the server.
+   * Send payload and await a matching response by id.
+   *
+   * @param {AffectPayload} payload
+   * @param {number} timeoutMs
+   * @returns {Promise<AffectPayload>}
+   */
+  _sendAndWait(payload, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this._pendingRequests.delete(payload.id);
+        reject(
+          new Error(`Timed out waiting for response to request ${payload.id}`),
+        );
+      }, timeoutMs);
+
+      this._pendingRequests.set(payload.id, { resolve, reject, timeoutId });
+      this.send(payload);
+    });
+  }
+
+  /**
+   * Get the latest affect/control payload received from the server.
    *
    * @returns {AffectPayload | null}
    */
@@ -423,12 +597,46 @@ export default class AffectEngineClient {
   }
 
   /**
-   * Convenience getter for just the values.
+   * Convenience getter for just the VAD values.
    *
    * @returns {AffectValues | null}
    */
   getLatestValues() {
     return this._latestAffect?.data?.values ?? null;
+  }
+
+  /**
+   * Convenience getter for reduced renderer-facing signals.
+   *
+   * @returns {AffectSignals | null}
+   */
+  getLatestSignals() {
+    return this._latestAffect?.data?.signals ?? null;
+  }
+
+  /**
+   * Convenience getter for public engine state.
+   *
+   * @returns {AffectPublicState | null}
+   */
+  getLatestPublicState() {
+    return this._latestAffect?.data?.publicState ?? null;
+  }
+
+  /**
+   * Convenience getter for runtime metadata.
+   *
+   * @returns {{ engineType?: string, scenario?: string | null, debug?: boolean } | null}
+   */
+  getLatestEngineMeta() {
+    const data = this._latestAffect?.data;
+    if (!data) return null;
+
+    return {
+      engineType: data.engineType,
+      scenario: data.scenario,
+      debug: data.debug,
+    };
   }
 
   /**
@@ -444,7 +652,7 @@ export default class AffectEngineClient {
    *
    * @param {string} eventName
    * @param {(payload?: any) => void} handler
-   * @returns {() => void} unsubscribe function
+   * @returns {() => void}
    */
   on(eventName, handler) {
     if (!this._listeners.has(eventName)) {
@@ -507,24 +715,54 @@ export default class AffectEngineClient {
   }
 
   /**
+   * Returns true for affect analysis responses and engine-control responses
+   * that carry the current runtime/engine state.
+   *
    * @param {unknown} payload
    * @returns {payload is AffectPayload}
    */
   _looksLikeAffectPayload(payload) {
-    return Boolean(
-      payload &&
-      typeof payload === "object" &&
-      "data" in payload &&
-      payload.data &&
-      typeof payload.data === "object" &&
+    if (!payload || typeof payload !== "object") {
+      return false;
+    }
+
+    if (!("type" in payload) || typeof payload.type !== "string") {
+      return false;
+    }
+
+    if (
+      !("data" in payload) ||
+      !payload.data ||
+      typeof payload.data !== "object"
+    ) {
+      return false;
+    }
+
+    const allowedTypes = new Set([
+      "affect_result",
+      "affect_engine_switched",
+      "affect_scenario_switched",
+      "affect_engine_reset",
+    ]);
+
+    if (!allowedTypes.has(payload.type)) {
+      return false;
+    }
+
+    const hasValuesShape =
       "values" in payload.data &&
       (payload.data.values === null ||
         (payload.data.values &&
           typeof payload.data.values === "object" &&
           typeof payload.data.values.valence === "number" &&
           typeof payload.data.values.arousal === "number" &&
-          typeof payload.data.values.dominance === "number")),
-    );
+          typeof payload.data.values.dominance === "number"));
+
+    const hasRuntimeState =
+      ("publicState" in payload.data && payload.data.publicState) ||
+      ("signals" in payload.data && payload.data.signals);
+
+    return Boolean(hasValuesShape || hasRuntimeState);
   }
 
   _flushQueue() {
@@ -544,7 +782,7 @@ export default class AffectEngineClient {
       delayMs: this.reconnectDelayMs,
     });
 
-    this._reconnectTimer = window.setTimeout(() => {
+    this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
       this.connect();
     }, this.reconnectDelayMs);

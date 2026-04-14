@@ -1,6 +1,6 @@
 import { WebSocketServer } from "ws";
-import AbstractAffectEngine from "./engine/AbstractAffectEngine.mjs";
-import AnxietyAffectEngine from "./engine/AnxietyAffectEngine.mjs";
+import AbstractAffectEngine from "./engine/affect/AbstractAffectEngine.mjs";
+import AffectEngineRuntime from "./engine/AffectEngineRuntime.mjs";
 import AffectStateDeltaLogger from "./engine/debug/AffectStateDeltaLogger.mjs";
 import { VadBert } from "./nlp/vad-bert.js";
 
@@ -14,11 +14,9 @@ const affectLogger = new AffectStateDeltaLogger({
   precision: 3,
   showUnchanged: false,
 });
-/**
- * Global singleton-ish engine for now.
- * Later this can be swapped via a message type.
- */
-const affectEngine = new AnxietyAffectEngine({
+
+const affectRuntime = new AffectEngineRuntime({
+  engineType: "anxiety",
   scenario: "anxious",
   logger: affectLogger,
   debug: true,
@@ -45,6 +43,8 @@ async function getVadBert() {
 /**
  * Normalize user-provided range.
  *
+ * Defaults to [0, 1] when absent.
+ *
  * @param {unknown} range
  * @returns {{ min: number | null, max: number | null }}
  */
@@ -64,7 +64,7 @@ function normalizeRange(range) {
 }
 
 /**
- * Whether caller requested output values normalized to a custom range.
+ * Whether caller requested output values normalized to a concrete range.
  *
  * @param {{ min: number | null, max: number | null }} range
  * @returns {boolean}
@@ -81,7 +81,15 @@ function hasConcreteRange(range) {
  * @param {string} text
  * @param {{valence:number, arousal:number, dominance:number} | symbol} value
  * @param {string} requestId
- * @returns {object}
+ * @returns {{
+ *   type: "affect" | "idle",
+ *   value: unknown,
+ *   meta: {
+ *     requestId: string,
+ *     source: string,
+ *     text: string
+ *   }
+ * }}
  */
 function buildEnginePacket(text, value, requestId) {
   if (value === AbstractAffectEngine.NO_INPUT) {
@@ -141,6 +149,29 @@ function sendError(ws, id, message) {
   );
 }
 
+/**
+ * Build a shared payload describing current runtime state.
+ *
+ * @returns {{
+ *   engineType: string,
+ *   scenario: string | null,
+ *   debug: boolean,
+ *   publicState: ReturnType<typeof affectRuntime.getPublicState>,
+ *   signals: ReturnType<typeof affectRuntime.getSignals>
+ * }}
+ */
+function getRuntimeData() {
+  const snapshot = affectRuntime.getSnapshot();
+
+  return {
+    engineType: snapshot.engineType,
+    scenario: snapshot.scenario,
+    debug: snapshot.debug,
+    publicState: snapshot.publicState,
+    signals: snapshot.signals,
+  };
+}
+
 wss.on("connection", (ws, req) => {
   const clientIp = req.socket.remoteAddress;
   console.log(`Client connected: ${clientIp}`);
@@ -162,69 +193,166 @@ wss.on("connection", (ws, req) => {
       return;
     }
 
-    if (type !== "analyze_affect") {
-      sendError(ws, id, `Unknown message type: ${type}`);
-      return;
-    }
-
-    const text = typeof data?.text === "string" ? data.text : "";
-    const trimmedText = text.trim();
-    const range = normalizeRange(data?.range);
-
-    console.log(`Affect request [${id}]:`, trimmedText);
-
     try {
-      let rawVAD;
-      let normalizedEngineVAD;
-      let packet;
+      // ---------------------------------------------------------------------
+      // ANALYZE AFFECT
+      // ---------------------------------------------------------------------
+      if (type === "analyze_affect") {
+        const text = typeof data?.text === "string" ? data.text : "";
+        const trimmedText = text.trim();
+        const range = normalizeRange(data?.range);
 
-      if (trimmedText === "") {
-        rawVAD = null;
-        normalizedEngineVAD = null;
+        console.log(`Affect request [${id}]:`, trimmedText);
 
-        packet = buildEnginePacket("", AbstractAffectEngine.NO_INPUT, id);
-      } else {
-        const model = await getVadBert();
+        let rawVAD;
+        let normalizedEngineVAD;
+        let packet;
 
-        // Raw model domain is [1, 5]
-        rawVAD = await model.predict(trimmedText);
+        if (trimmedText === "") {
+          rawVAD = null;
+          normalizedEngineVAD = null;
 
-        // Engine consumes normalized [0, 1]
-        normalizedEngineVAD = VadBert.normalizeVAD(rawVAD, 0, 1);
+          packet = buildEnginePacket("", AbstractAffectEngine.NO_INPUT, id);
+        } else {
+          const model = await getVadBert();
 
-        packet = buildEnginePacket(trimmedText, normalizedEngineVAD, id);
+          // Raw model domain is [1, 5]
+          rawVAD = await model.predict(trimmedText);
+
+          // Engine consumes normalized [0, 1]
+          normalizedEngineVAD = VadBert.normalizeVAD(rawVAD, 0, 1);
+
+          packet = buildEnginePacket(trimmedText, normalizedEngineVAD, id);
+        }
+
+        const publicState = affectRuntime.tick(packet);
+        const signals = affectRuntime.getSignals();
+
+        const responseValues =
+          rawVAD == null
+            ? null
+            : hasConcreteRange(range)
+              ? VadBert.normalizeVAD(rawVAD, range.min, range.max)
+              : rawVAD;
+
+        const payload = {
+          id,
+          type: "affect_result",
+          data: {
+            text,
+            range,
+            values: responseValues,
+            ...getRuntimeData(),
+            publicState,
+            signals,
+          },
+        };
+
+        broadcast(payload);
+        return;
       }
 
-      affectEngine.tick(packet);
+      // ---------------------------------------------------------------------
+      // SWITCH ENGINE
+      // ---------------------------------------------------------------------
+      if (type === "switch_affect_engine") {
+        const engineType =
+          typeof data?.engineType === "string" ? data.engineType : null;
+        const scenario =
+          typeof data?.scenario === "string" ? data.scenario : null;
 
-      const publicState = affectEngine.getPublicState();
-      const signals = affectEngine.getSignals();
+        if (!engineType) {
+          sendError(ws, id, "switch_affect_engine requires data.engineType");
+          return;
+        }
 
-      // Keep caller-facing values compatible with previous client expectations.
-      // For empty text, values is null.
-      const responseValues =
-        rawVAD == null
-          ? null
-          : hasConcreteRange(range)
-            ? VadBert.normalizeVAD(rawVAD, range.min, range.max)
-            : rawVAD;
+        console.log(
+          `Switch affect engine [${id}]: engineType=${engineType}, scenario=${scenario}`,
+        );
 
-      const payload = {
-        id,
-        type: "affect_result",
-        data: {
-          text,
-          range,
-          values: responseValues,
-          publicState,
-          signals,
-        },
-      };
+        const result = affectRuntime.switchEngine(engineType, scenario);
 
-      // Fan out to all listeners, including requester.
-      broadcast(payload);
+        const payload = {
+          id,
+          type: "affect_engine_switched",
+          data: {
+            engineType: result.engineType,
+            scenario: result.scenario,
+            publicState: result.publicState,
+            signals: result.signals,
+          },
+        };
+
+        broadcast(payload);
+        return;
+      }
+
+      // ---------------------------------------------------------------------
+      // SWITCH SCENARIO
+      // ---------------------------------------------------------------------
+      if (type === "switch_affect_scenario") {
+        const scenario =
+          typeof data?.scenario === "string" ? data.scenario : null;
+
+        console.log(
+          `Switch affect scenario [${id}]: engineType=${affectRuntime.engineType}, scenario=${scenario}`,
+        );
+
+        const result = affectRuntime.switchScenario(scenario);
+
+        const payload = {
+          id,
+          type: "affect_scenario_switched",
+          data: {
+            engineType: result.engineType,
+            scenario: result.scenario,
+            publicState: result.publicState,
+            signals: result.signals,
+          },
+        };
+
+        broadcast(payload);
+        return;
+      }
+
+      // ---------------------------------------------------------------------
+      // RESET ENGINE
+      // ---------------------------------------------------------------------
+      if (type === "reset_affect_engine") {
+        const scenario =
+          typeof data?.scenario === "string"
+            ? data.scenario
+            : data?.scenario === null
+              ? null
+              : undefined;
+
+        console.log(
+          `Reset affect engine [${id}]: engineType=${affectRuntime.engineType}, scenario=${scenario}`,
+        );
+
+        const result = affectRuntime.reset(scenario);
+
+        const payload = {
+          id,
+          type: "affect_engine_reset",
+          data: {
+            engineType: result.engineType,
+            scenario: result.scenario,
+            publicState: result.publicState,
+            signals: result.signals,
+          },
+        };
+
+        broadcast(payload);
+        return;
+      }
+
+      // ---------------------------------------------------------------------
+      // UNKNOWN
+      // ---------------------------------------------------------------------
+      sendError(ws, id, `Unknown message type: ${type}`);
     } catch (err) {
-      console.error(`Affect request failed [${id}]:`, err);
+      console.error(`Request failed [${id}] type=${type}:`, err);
       sendError(
         ws,
         id,

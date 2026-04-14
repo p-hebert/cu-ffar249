@@ -680,30 +680,29 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
   }
 
   /**
-   * Renderer-agnostic semantic output signals.
+   * Renderer-facing shared signal surface.
    *
-   * These are the values that downstream consumers
-   * (frontend visuals, MaxMSP audio, debug tools)
-   * can map however they want.
+   * These signals are intentionally engine-agnostic so that
+   * downstream visual/audio modules can use one stable interface
+   * across anxiety, burnout, and depression.
    *
-   * @returns {AnxietySignals}
+   * @returns {{
+   *   regime: string,
+   *   load: number,
+   *   altitude: number,
+   *   peace: number,
+   *   activation: number,
+   *   constriction: number,
+   *   instability: number
+   * }}
    */
   getSignals() {
     const input = /** @type {Partial<AnxietyDerivedInput> | null} */ (
       this.derivedInput
     );
 
-    const valence = input?.valence ?? 0;
     const arousal = input?.arousal ?? 0;
     const dominance = input?.dominance ?? 0;
-    const threatCue = input?.threatCue ?? 0;
-    const reliefCue = input?.reliefCue ?? 0;
-    const griefCue = input?.griefCue ?? 0;
-    const shockCue = input?.shockCue ?? 0;
-    const peaceCue = input?.peaceCue ?? 0;
-    const alarm = input?.alarm ?? 0;
-    const destabilization = input?.destabilization ?? 0;
-    const regulation = input?.regulation ?? 0;
 
     return {
       regime: this.getRegime(),
@@ -711,30 +710,18 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
       load: this.state.load,
       altitude: this.state.altitude,
       peace: this.state.peace,
-      vigilance: this.state.vigilance,
-      spiral: this.state.spiral,
-      freeze: this.state.freeze,
 
-      valence,
-      arousal,
-      dominance,
-      threatCue,
-      reliefCue,
-      griefCue,
-      shockCue,
-      peaceCue,
-      alarm,
-      destabilization,
-      regulation,
+      // Anxiety activation is mostly arousal + vigilance.
+      activation: this._clamp01(arousal * 0.55 + this.state.vigilance * 0.45),
 
-      instability: this._clamp01(
-        this.state.spiral * 0.6 + this.state.vigilance * 0.4,
-      ),
+      // Constriction is physical/affective tightening.
       constriction: this._clamp01(
         this.state.freeze * 0.7 + (1 - dominance) * 0.3,
       ),
-      recoveryReadiness: this._clamp01(
-        this.state.peace * 0.5 + this.state.altitude * 0.3 + dominance * 0.2,
+
+      // Instability is recursive wobble / reactivity.
+      instability: this._clamp01(
+        this.state.spiral * 0.6 + this.state.vigilance * 0.4,
       ),
     };
   }

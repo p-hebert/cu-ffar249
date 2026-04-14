@@ -599,14 +599,15 @@ export default class AnxietyAffectEngine extends AbstractAffectEngine {
 
       this.state.peace = this._clamp01(
         prevPeace * 0.9 +
-          (1 - this.state.load) * 0.05 * m.noInputRecoveryGain +
-          (1 - this.state.vigilance) * 0.01,
+          (1 - this.state.load) * 0.08 * m.noInputRecoveryGain +
+          (1 - this.state.vigilance) * 0.03,
       );
 
       this.state.altitude = this._clamp01(
-        prevAltitude * 0.96 +
-          this.state.peace * 0.04 * m.altitudeGain -
-          this.state.freeze * 0.02,
+        prevAltitude * 0.95 +
+          this.state.peace * 0.06 * m.altitudeGain +
+          (1 - this.state.load) * 0.02 -
+          this.state.freeze * 0.015,
       );
 
       this.applyRegimeConstraints();

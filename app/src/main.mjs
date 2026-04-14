@@ -16,7 +16,7 @@ const RUNTIME = new P5Runtime({
 
 const LOADING = new LoadingScene({
   resources: resources,
-  nextScene: "game",
+  nextScene: "menu",
   title: "Loading",
   getStatusText: null,
 });

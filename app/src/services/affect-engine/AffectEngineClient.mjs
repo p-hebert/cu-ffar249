@@ -58,7 +58,29 @@
  * }} data
  */
 
-import WebSocket from "ws";
+/**
+ * Resolve the correct WebSocket implementation depending on runtime.
+ *
+ * - Browser → native WebSocket
+ * - Node → dynamically import "ws"
+ *
+ * This avoids bundling "ws" in browser builds.
+ *
+ * @returns {Promise<typeof WebSocket>}
+ */
+async function resolveWebSocketImpl() {
+  // Browser environment
+  if (
+    typeof window !== "undefined" &&
+    typeof window.WebSocket !== "undefined"
+  ) {
+    return window.WebSocket;
+  }
+
+  // Node environment
+  const mod = await import("ws");
+  return mod.default;
+}
 
 /**
  * WebSocket client for the affect engine server/runtime.
@@ -184,11 +206,26 @@ export default class AffectEngineClient {
    * Opens the websocket connection.
    * Safe to call multiple times.
    *
+   * Works in both:
+   * - browser (native WebSocket)
+   * - Node (ws)
+   *
    * @returns {Promise<void>}
    */
-  connect() {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      return Promise.resolve();
+  async connect() {
+    const WS_CONNECTING = 0;
+    const WS_OPEN = 1;
+
+    if (this.ws && this.ws.readyState === WS_OPEN) {
+      return;
+    }
+
+    if (
+      this.ws &&
+      this.ws.readyState === WS_CONNECTING &&
+      this._connectPromise
+    ) {
+      return this._connectPromise;
     }
 
     if (this._connectPromise) {
@@ -198,124 +235,118 @@ export default class AffectEngineClient {
     this._manuallyClosed = false;
     this._emit("status", { status: "connecting" });
 
-    this._connectPromise = new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url);
+    this._connectPromise = (async () => {
+      const WebSocketImpl = await resolveWebSocketImpl();
 
-      const cleanup = () => {
-        if (!this.ws) return;
+      const ws = new WebSocketImpl(this.url);
+      this.ws = ws;
 
-        this.ws.removeEventListener("open", handleOpen);
-        this.ws.removeEventListener("error", handleError);
-        this.ws.removeEventListener("close", handleClose);
-      };
+      return new Promise((resolve, reject) => {
+        const cleanup = () => {
+          ws.removeEventListener?.("open", handleOpen);
+          ws.removeEventListener?.("error", handleError);
+          ws.removeEventListener?.("close", handleClose);
 
-      const handleOpen = () => {
-        cleanup();
+          ws.off?.("open", handleOpen);
+          ws.off?.("error", handleError);
+          ws.off?.("close", handleClose);
+        };
 
-        this._emit("status", { status: "open" });
-        this._emit("open");
-
-        this._flushQueue();
-
-        this._connectPromise = null;
-        resolve();
-      };
-
-      const handleError = (error) => {
-        cleanup();
-        this._connectPromise = null;
-
-        let message = "WebSocket connection error";
-
-        if (error instanceof Error) {
-          message = error.message || message;
-        } else if (error?.message) {
-          message = error.message;
-        } else if (error?.type === "error") {
-          message =
-            "WebSocket error event (connection may have failed, been refused, or blocked)";
-        }
-
-        if (this.url) {
-          try {
-            const urlObj = new URL(this.url);
-
-            if (
-              urlObj.protocol === "ws:" &&
-              typeof window !== "undefined" &&
-              window.location.protocol === "https:"
-            ) {
-              message +=
-                " — Mixed content: cannot connect to ws:// from https://";
-            }
-
-            if (
-              urlObj.hostname === "localhost" ||
-              urlObj.hostname === "127.0.0.1" ||
-              urlObj.hostname === "[::]" ||
-              urlObj.hostname === "[::1]"
-            ) {
-              message +=
-                " — Check that the local server is running and reachable";
-            }
-          } catch (_) {
-            // ignore URL parsing issues
-          }
-        }
-
-        const enrichedError = new Error(message);
-        enrichedError.data = error;
-
-        AffectEngineClient.#_purgeCachedInstance(this);
-
-        reject(enrichedError);
-      };
-
-      const handleClose = (event) => {
-        const wasNeverOpened = this.ws?.readyState !== WebSocket.OPEN;
-
-        if (wasNeverOpened) {
+        const handleOpen = () => {
           cleanup();
 
+          this._emit("status", { status: "open" });
+          this._emit("open");
+
+          this._flushQueue();
+
           this._connectPromise = null;
+          resolve();
+        };
+
+        const handleError = (error) => {
+          cleanup();
+          this._connectPromise = null;
+
           AffectEngineClient.#_purgeCachedInstance(this);
+          reject(error instanceof Error ? error : new Error("WebSocket error"));
+        };
 
-          reject(new Error(`Connection closed: ${event.code} ${event.reason}`));
-          return;
+        const handleClose = (event) => {
+          const wasNeverOpened = ws.readyState !== WS_OPEN;
+
+          if (wasNeverOpened) {
+            cleanup();
+            this._connectPromise = null;
+
+            AffectEngineClient.#_purgeCachedInstance(this);
+
+            reject(
+              new Error(
+                `Connection closed: ${event?.code ?? ""} ${event?.reason ?? ""}`,
+              ),
+            );
+            return;
+          }
+
+          if (!this.autoReconnect) {
+            AffectEngineClient.#_purgeCachedInstance(this);
+          }
+        };
+
+        // Browser
+        if (ws.addEventListener) {
+          ws.addEventListener("open", handleOpen);
+          ws.addEventListener("error", handleError);
+          ws.addEventListener("close", handleClose);
+
+          ws.addEventListener("message", (event) => {
+            this._handleMessage(event.data);
+          });
+
+          ws.addEventListener("close", (event) => {
+            this._emit("status", {
+              status: "closed",
+              code: event.code,
+              reason: event.reason,
+              wasClean: event.wasClean,
+            });
+
+            this._emit("close", event);
+
+            if (!this._manuallyClosed && this.autoReconnect) {
+              this._scheduleReconnect();
+            }
+          });
+        } else {
+          // Node (ws)
+          ws.on("open", handleOpen);
+          ws.on("error", handleError);
+          ws.on("close", handleClose);
+
+          ws.on("message", (data) => {
+            this._handleMessage(
+              typeof data === "string" ? data : data.toString(),
+            );
+          });
+
+          ws.on("close", (code, reason) => {
+            this._emit("status", {
+              status: "closed",
+              code,
+              reason: reason?.toString?.() ?? "",
+              wasClean: true,
+            });
+
+            this._emit("close", { code, reason });
+
+            if (!this._manuallyClosed && this.autoReconnect) {
+              this._scheduleReconnect();
+            }
+          });
         }
-
-        if (!this.autoReconnect) {
-          AffectEngineClient.#_purgeCachedInstance(this);
-        }
-      };
-
-      this.ws.addEventListener("open", handleOpen);
-      this.ws.addEventListener("error", handleError);
-      this.ws.addEventListener("close", handleClose);
-
-      this.ws.addEventListener("message", (event) => {
-        this._handleMessage(event.data);
       });
-
-      this.ws.addEventListener("error", (error) => {
-        this._emit("error", error);
-      });
-
-      this.ws.addEventListener("close", (event) => {
-        this._emit("status", {
-          status: "closed",
-          code: event.code,
-          reason: event.reason,
-          wasClean: event.wasClean,
-        });
-
-        this._emit("close", event);
-
-        if (!this._manuallyClosed && this.autoReconnect) {
-          this._scheduleReconnect();
-        }
-      });
-    });
+    })();
 
     return this._connectPromise;
   }

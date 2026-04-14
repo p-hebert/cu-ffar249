@@ -23,6 +23,8 @@
  * }} data
  */
 
+import WebSocket from "ws";
+
 /**
  * Browser-side WebSocket client for an affect engine.
  *

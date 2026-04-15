@@ -195,6 +195,7 @@ export default class LineInput extends BaseInteractiveInput {
 
     p5.push();
     {
+      p5.blendMode(p5.EXCLUSION);
       // Underline
       p5.fill(255, this.opacity * 255);
       p5.noStroke();

@@ -1,3 +1,4 @@
+import AffectNoiseFieldDrawable from "src/components/affect/AffectNoiseFieldDrawable.mjs";
 import LineInput from "src/components/input.mjs";
 import { AFFECT_ENGINE_URL } from "src/constants.mjs";
 import { BaseScene } from "src/p5/scene.mjs";
@@ -24,6 +25,7 @@ export default class GameScene extends BaseScene {
     this._tickIntervalMs = tickIntervalMs;
     this._tickInterval = null;
     this._affectEngineClient = null;
+    this._affectDrawable = null;
   }
 
   /**
@@ -39,6 +41,12 @@ export default class GameScene extends BaseScene {
     // Get AffectEngineClient
     this._affectEngineClient = AffectEngineClient.getInstance({
       url: AFFECT_ENGINE_URL,
+    });
+
+    // Affect visual effects
+    this._affectDrawable = new AffectNoiseFieldDrawable({
+      width: p5.width,
+      height: p5.height,
     });
 
     // Setup LineInput
@@ -70,18 +78,48 @@ export default class GameScene extends BaseScene {
         Date.now() - this.input.lastTouched > this._tickIntervalMs;
       if (this._enableNoInputInterval && noInputInInterval) {
         console.log("Submitting no-input");
-        this._affectEngineClient.submitText("");
+        this.submitTextAndUpdate("");
       }
     }, this._tickIntervalMs);
 
-    this._setupped = true;
+    this._affectEngineClient
+      .getState()
+      .then(({ data: { signals, engineType } }) => {
+        this._affectDrawable.setAffectState({
+          regime: signals.regime,
+          signals: signals,
+          affectEngine: engineType,
+        });
+        this._setupped = true;
+      });
   }
 
-  async onSubmitCallback(value) {
-    if (value === null) return;
-    console.log(await this._affectEngineClient.submitTextAndWait(value));
-    this._submittedTexts.unshift(value);
-    if (this._submittedTexts.length > 7) this._submittedTexts.pop();
+  enableNoInputInterval() {
+    this._enableNoInputInterval = true;
+  }
+
+  disableNoInputInterval() {
+    this._enableNoInputInterval = false;
+  }
+
+  async onSubmitCallback(text) {
+    return this.submitTextAndUpdate(text);
+  }
+
+  async submitTextAndUpdate(text) {
+    if (text === null) return;
+    const result = await this._affectEngineClient.submitTextAndWait(text);
+    console.log(result);
+    this._affectDrawable.setAffectState({
+      regime: result.data.signals.regime,
+      signals: result.data.signals,
+      affectEngine: result.data.engineType,
+    });
+
+    if (text !== "") {
+      this._submittedTexts.unshift(text);
+      if (this._submittedTexts.length > 7) this._submittedTexts.pop();
+    }
   }
 
   /**
@@ -98,6 +136,10 @@ export default class GameScene extends BaseScene {
    */
   draw(p5) {
     p5.background("black");
+    if (!this._setupped) {
+      return;
+    }
+    this._affectDrawable.draw(p5);
     this.input.draw(p5);
     this._drawSubmittedTexts(p5);
   }

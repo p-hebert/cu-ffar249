@@ -179,7 +179,7 @@ export default class AbstractAffectEngine {
     const nextPublicState = this.getPublicState();
 
     if (this.logger && typeof this.logger.logTick === "function") {
-      this.logger.logTick(prevPublicState, nextPublicState);
+      this.logger.logTick(packet, prevPublicState, nextPublicState);
     }
 
     return nextPublicState;

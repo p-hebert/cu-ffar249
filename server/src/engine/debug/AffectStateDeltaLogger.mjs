@@ -9,7 +9,7 @@ export default class AffectStateDeltaLogger {
     };
   }
 
-  logTick(prevPublicState, nextPublicState) {
+  logTick(packet, prevPublicState, nextPublicState) {
     const prevState = prevPublicState?.state ?? {};
     const nextState = nextPublicState?.state ?? {};
 
@@ -21,6 +21,9 @@ export default class AffectStateDeltaLogger {
 
     console.log("");
     console.log(this._bold("=== AFFECT TICK ==="));
+    this._logPacket(packet);
+
+    console.log(this._dim("-- machine --"));
     console.log(
       `${this._label("regime")} ${this._formatRegime(prevRegime)} ${this._arrowForChange(prevRegime, nextRegime)} ${this._formatRegime(nextRegime)}`,
     );
@@ -31,6 +34,21 @@ export default class AffectStateDeltaLogger {
       prevSignals,
       nextSignals,
       this.config.signalKeys,
+    );
+  }
+
+  _logPacket(packet) {
+    console.log(this._dim("-- packet --"));
+    console.log(this._formatPropLine("type", packet.type));
+    console.log(this._formatPropLine("text", `"${packet.meta.text}"`));
+    console.log(
+      this._formatPropLine("valence", packet.value?.valence ?? "n/a"),
+    );
+    console.log(
+      this._formatPropLine("arousal", packet.value?.arousal ?? "n/a"),
+    );
+    console.log(
+      this._formatPropLine("dominance", packet.value?.dominance ?? "n/a"),
     );
   }
 
@@ -67,6 +85,10 @@ export default class AffectStateDeltaLogger {
       const bv = b?.[key];
       return Number.isFinite(av) || Number.isFinite(bv);
     });
+  }
+
+  _formatPropLine(key, value) {
+    return `${this._label(key)} ${value}${this._reset()}`;
   }
 
   _formatDeltaLine(key, prev, next) {

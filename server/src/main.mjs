@@ -195,6 +195,27 @@ wss.on("connection", (ws, req) => {
 
     try {
       // ---------------------------------------------------------------------
+      // GET CURRENT ENGINE/RUNTIME STATE
+      // ---------------------------------------------------------------------
+      if (type === "get_affect_state") {
+        console.log(
+          `Get affect state [${id}]: engineType=${affectRuntime.engineType}, scenario=${affectRuntime.scenario}`,
+        );
+
+        const payload = {
+          id,
+          type: "affect_state",
+          data: {
+            ...getRuntimeData(),
+          },
+        };
+
+        // For get_state, reply only to requester.
+        ws.send(JSON.stringify(payload));
+        return;
+      }
+
+      // ---------------------------------------------------------------------
       // ANALYZE AFFECT
       // ---------------------------------------------------------------------
       if (type === "analyze_affect") {

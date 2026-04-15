@@ -10,8 +10,6 @@
  * - Inputs
  *
  * and many more, especially if we consider the IP5Drawable interface.
- *
- * 100% manually implemented.
  */
 export class IP5Drawable {
   /**

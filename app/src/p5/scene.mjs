@@ -262,6 +262,10 @@ export class BaseSceneManager extends IP5Lifecycle {
       throw new Error(`Unknown scene '${key}'`);
     }
     this.current = this.scenes.get(key);
+    // Expose current scene on window app for debugging
+    if (window.app && typeof window.app === "object") {
+      window.app.currentScene = this.current;
+    }
   }
 
   // P5 LIFECYCLE METHODS ==========================================================================

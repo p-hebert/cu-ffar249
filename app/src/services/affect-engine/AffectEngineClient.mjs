@@ -374,7 +374,24 @@ export default class AffectEngineClient {
    * @returns {boolean}
    */
   isConnected() {
-    return this.ws?.readyState === WebSocket.OPEN;
+    const WS_OPEN = 1;
+    return this.ws?.readyState === WS_OPEN;
+  }
+
+  /**
+   * Request the current AffectEngineRuntime state from the server.
+   *
+   * @param {number} [timeoutMs=5000]
+   * @returns {Promise<AffectPayload>}
+   */
+  async getState(timeoutMs = 5000) {
+    const payload = {
+      id: crypto.randomUUID(),
+      type: "get_affect_state",
+      data: {},
+    };
+
+    return this._sendAndWait(payload, timeoutMs);
   }
 
   /**
@@ -416,7 +433,7 @@ export default class AffectEngineClient {
    * @param {number} [options.timeoutMs=5000]
    * @returns {Promise<AffectPayload>}
    */
-  submitTextAndWait(
+  async submitTextAndWait(
     text,
     { min = null, max = null, type = "analyze_affect", timeoutMs = 5000 } = {},
   ) {
@@ -770,6 +787,7 @@ export default class AffectEngineClient {
     }
 
     const allowedTypes = new Set([
+      "affect_state",
       "affect_result",
       "affect_engine_switched",
       "affect_scenario_switched",

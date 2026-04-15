@@ -5,6 +5,10 @@ import GameScene from "src/scenes/game.mjs";
 import LoadingScene from "src/scenes/loading.mjs";
 import MenuScene from "src/scenes/menu.mjs";
 
+if (import.meta.env.MODE === "development") {
+  window.app = {};
+}
+
 /**
  * Instantiate the runtime
  */

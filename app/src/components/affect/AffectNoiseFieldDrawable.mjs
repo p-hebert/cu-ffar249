@@ -271,11 +271,11 @@ export default class AffectNoiseFieldDrawable extends IP5Drawable {
     // So effective range was [0.01 .. 1.0].
     let pd01 =
       0.45 * load +
-      1.0 * altitude +
-      1.0 * peace +
+      1.0 * (1-altitude) +
+      1.0 * (1-peace) +
       0.8 * activation +
       0.9 * constriction +
-      0.0 * instability;
+      1.0 * instability;
 
     // Instability strongly collapses density.
     pd01 *= 1 - 0.92 * instability;
@@ -283,19 +283,21 @@ export default class AffectNoiseFieldDrawable extends IP5Drawable {
     // Keep some floor so it does not vanish completely.
     pd01 = clamp01(Math.max(0.02, pd01));
 
+    // Variance in the mean horizontal line of the noise wave
     // Noise level corresponds to old sliderN in [10..1000]
     // "mid" ~ around 0.45 to 0.6
     let noiseLevel01 =
-      0.5 * load +
-      0.5 * altitude +
-      0.55 * peace +
-      0.55 * activation +
+      0.75 * load +
+      0.25 * altitude +
+      0.25 * peace +
+      0.75 * activation +
       0.15 * constriction +
       0.5 * instability;
 
     noiseLevel01 = clamp01(noiseLevel01);
     const noiseLevel = lerp(10, 1000, noiseLevel01);
 
+    // Variance in the wave height
     // Noise scale corresponds to old sliderNS in [1..100], then /1000
     // So effective range [0.001 .. 0.1]
     let noiseScale01 =
@@ -311,28 +313,35 @@ export default class AffectNoiseFieldDrawable extends IP5Drawable {
 
     // RGBA channel biases, normalized first in [0..1], then mapped to [0..255]
     let r01 =
-      0.15 * load +
-      0.9 * altitude +
-      0.1 * peace +
-      1.0 * activation +
-      1.0 * constriction +
-      0.5 * instability;
+      0.3 * load +
+      0.05 * altitude +
+      0.05 * peace +
+      0.4 * activation +
+      0.4 * constriction +
+      0.25 * instability;
+
+    r01 = clamp01(r01);
 
     let g01 =
-      0.15 * load +
-      0.9 * altitude +
-      1.0 * peace +
-      1.0 * activation +
-      0.1 * constriction +
-      0.5 * instability;
+      r01 > 0.5 ? 0 :
+      0.05 * (1-load) +
+      0.2 * altitude +
+      0.4 * peace +
+      0.4 * (1-activation) +
+      0.05 * constriction +
+      0.05 * instability;
+
+    g01 = clamp01(g01);
 
     let b01 =
-      0.15 * load +
-      0.9 * altitude +
+      0.1 * load +
+      0 * altitude +
       0.1 * peace +
-      1.0 * activation +
-      0.1 * constriction +
-      0.5 * instability;
+      0.1 * activation +
+      0.35 * constriction +
+      0.45 * instability;
+    
+    
 
     let a01 =
       0.9 * load +
@@ -341,9 +350,7 @@ export default class AffectNoiseFieldDrawable extends IP5Drawable {
       1.0 * activation +
       0.9 * constriction +
       0.5 * instability;
-
-    r01 = clamp01(r01);
-    g01 = clamp01(g01);
+    
     b01 = clamp01(b01);
     a01 = clamp01(a01);
 

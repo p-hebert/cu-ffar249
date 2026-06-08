@@ -6,8 +6,6 @@ In contemporary society, work is often valued only when it is visible, measurabl
 
 The work functions as both a simulation and a metaphor. Its changing audiovisual environment does not claim to objectively represent mental illness; instead, it creates an experiential analogy for the constant, often exhausting work of maintaining internal balance.
 
----
-
 ## Artist Statement
 
 *Pressures* was created as a response to the invisibility of mental-health labour. People experiencing anxiety, burnout, depression, or other psychological difficulties often perform continuous internal maintenance simply to function in daily life. This effort can involve monitoring one’s thoughts, regulating emotional intensity, managing exhaustion, avoiding collapse, recovering from stress, or trying to remain socially and professionally functional despite internal instability.
@@ -15,8 +13,6 @@ The work functions as both a simulation and a metaphor. Its changing audiovisual
 This labour is rarely recognized as labour. It does not always produce a visible object, a measurable output, or an economically useful result. Because of this, it is often ignored or devalued by a society that tends to prioritize productivity, performance, and external achievement.
 
 The project reframes emotional regulation as a form of maintenance: repetitive, necessary, difficult, and essential to survival. By making this internal process visible and interactive, *Pressures* invites viewers to reconsider what counts as work, what remains invisible, and whose effort is recognized.
-
----
 
 ## Concept
 
@@ -27,8 +23,6 @@ The central question behind the project is:
 The piece answers this question through an interactive system that externalizes an internal emotional landscape. The viewer enters text into the interface. The system interprets the emotional qualities of that text and translates them into changing visual and sonic states.
 
 The result is an audiovisual metaphor for the nervous system under pressure. Calm inputs may produce softer, slower, more stable audiovisual behaviour. More charged or distressing inputs may increase intensity, instability, sharpness, noise, and movement. The work asks the viewer not only to understand emotional regulation intellectually, but to experience a simplified analogy of its ongoing effort.
-
----
 
 ## Experience
 
@@ -43,8 +37,6 @@ The system responds through:
 * transitions between calmer and more activated internal states.
 
 The viewer may attempt to stabilize the system, but the work is not designed as a traditional game with a clear win condition. Instead, the interaction highlights the difficulty of regulation itself. The system may resist immediate calming, remain unstable, or respond disproportionately, reflecting the way mental-health states can be difficult to control through intention alone.
-
----
 
 ## How It Works
 
@@ -61,8 +53,6 @@ At a high level, the system follows this pipeline:
 7. The visual and audio systems generate a changing audiovisual environment based on the current simulated emotional state.
 
 The work is generative because the final audiovisual output is not fixed in advance. Instead, it emerges from the interaction between the viewer’s text, the affect-analysis model, the emotional-state engine, and the audiovisual generation systems.
-
----
 
 ## Technical Architecture
 
@@ -118,8 +108,6 @@ The sound component uses **Max/MSP** and **FluCoMa** to generate an evolving sou
 
 The soundscape combines environmental recordings such as rain, thunder, city ambience, nature sounds, people talking, and ambient textures. These sounds are layered dynamically to reflect changes in the internal state of the system.
 
----
-
 ## Technologies Used
 
 * Natural language processing
@@ -133,8 +121,6 @@ The soundscape combines environmental recordings such as rain, thunder, city amb
 * Freesound audio samples
 * Interactive audiovisual design
 
----
-
 ## Visual Design
 
 The visual design uses abstraction rather than literal representation. Instead of showing a person, face, or explicit narrative, the work presents an internal landscape through colour, motion, rhythm, and density.
@@ -146,8 +132,6 @@ The report documents two contrasting visual states:
 
 This contrast makes the invisible state of the system perceptible. The viewer does not see “mental illness” directly; they see a dynamic landscape that reacts, destabilizes, and changes under pressure.
 
----
-
 ## Sound Design
 
 The soundscape extends the emotional state of the work into the auditory field. Environmental recordings are not used as fixed background music, but as flexible layers whose intensity shifts according to the system’s internal variables.
@@ -155,8 +139,6 @@ The soundscape extends the emotional state of the work into the auditory field. 
 The project uses sound samples from Freesound, including rain, thunder, city ambience, nature ambience, ambient waves, and crowd sounds. These materials help create an immersive emotional environment that can move between calm, tension, pressure, and overload.
 
 The sound design was influenced by Norah Wilcox’s *A Familiar Soundscape: Beaver Lake in July*, particularly in its use of recorded sound environments as immersive material.
-
----
 
 ## References and Influences
 
@@ -182,8 +164,6 @@ The project uses the Valence / Arousal / Dominance model of affect to translate 
 
 The sound design was inspired by Norah Wilcox’s *A Familiar Soundscape: Beaver Lake in July*, particularly its use of layered environmental recordings to construct an immersive virtual atmosphere.
 
----
-
 ## Limitations
 
 The project is an artistic simulation, not a clinical model. Its emotional-state engine is interpretive and metaphorical rather than diagnostic or objective.
@@ -197,8 +177,6 @@ Some limitations include:
 * audience understanding may depend on how clearly the system architecture and concept are introduced.
 
 These limitations are also part of the work’s critical context. The system does not reveal an objective truth about emotion; it stages a mediated, computational interpretation of affect.
-
----
 
 ## Future Work
 
@@ -215,30 +193,17 @@ Possible improvements include:
 * creating a more complete installation format with projection and spatial audio;
 * adding documentation that helps viewers understand the conceptual framing before or after interacting with the piece.
 
----
-
 ## Credits
 
-Created by:
-
-**Philippe Beauchemin**
-**Philippe Hébert**
-
-For **FFAR 249**, Faculty of Fine Arts, Concordia University.
-
-Tutorial Leader: **Loïc Chauvin**
-
----
+Created by **Philippe Beauchemin** & **Philippe Hébert** for **FFAR 249**, Faculty of Fine Arts, Concordia University.
 
 ## License
 
 This project contains code, documentation, visual material, and third-party sound samples. Licenses may differ between components.
 
-Code: CC-4.0, see LICENSE.md
-Documentation: CC-4.0
-Sound samples: Refer to individual Freesound sample licenses on Freesound.org
-
----
+**Code:** CC-4.0, see LICENSE.md<br/>
+**Documentation:** CC-4.0<br/>
+**Sound samples:** Refer to individual Freesound sample licenses on Freesound.org
 
 ## Sound Sample Credits
 
